@@ -66,8 +66,7 @@ import java.net.URLEncoder
 
 data class EpubItem(
     val uri: Uri,
-    val displayName: String,
-    val resolvedFile: File?
+    val displayName: String
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -225,8 +224,9 @@ fun LibraryScreen(navController: NavController) {
                         uri = item.uri,
                         displayName = item.displayName,
                         onBookClick = {
-                            item.resolvedFile?.let { file ->
-                                val encodedPath = URLEncoder.encode(file.absolutePath, "UTF-8")
+                            val file = UriFileResolver.resolveUriToFile(context, item.uri)
+                            file?.let {
+                                val encodedPath = URLEncoder.encode(it.absolutePath, "UTF-8")
                                 navController.navigate("reader/$encodedPath")
                             }
                         },
@@ -491,8 +491,7 @@ private suspend fun scanLibrarySourcesWithMetadata(
             } else {
                 val fileName = getDisplayNameFromUri(context, sourceUri) ?: ""
                 if (fileName.endsWith(".epub", ignoreCase = true)) {
-                    val resolvedFile = UriFileResolver.resolveUriToFile(context, sourceUri)
-                    epubItems.add(EpubItem(sourceUri, fileName, resolvedFile))
+                    epubItems.add(EpubItem(sourceUri, fileName))
                 }
             }
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
@@ -565,8 +564,7 @@ private suspend fun scanDirectoryForEpubsWithMetadata(
                 if (mimeType == DocumentsContract.Document.MIME_TYPE_DIR) {
                     epubItems.addAll(scanDirectoryForEpubsWithMetadata(context, documentUri))
                 } else if (displayName?.endsWith(".epub", ignoreCase = true) == true) {
-                    val resolvedFile = UriFileResolver.resolveUriToFile(context, documentUri)
-                    epubItems.add(EpubItem(documentUri, displayName, resolvedFile))
+                    epubItems.add(EpubItem(documentUri, displayName))
                 }
             }
         }
@@ -647,9 +645,10 @@ private fun isBookInLibraryItems(
         return false
     }
 
-    // Check if any of the available items point to this book (already resolved during scanning)
+    // Check if any of the available items point to this book by comparing book names
+    val bookFileName = bookFile.name
     return availableItems.any { item ->
-        item.resolvedFile?.absolutePath == bookPath
+        item.displayName == bookFileName
     }
 }
 

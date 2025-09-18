@@ -24,6 +24,9 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import java.io.File
 
+private const val MAX_RESTORATION_ATTEMPTS = 50
+private const val RESTORATION_DELAY_MS = 20L
+
 /**
  * Composable that tracks reading progress and automatically saves user position
  */
@@ -151,9 +154,27 @@ fun RestoreReadingPosition(
     chapters: List<RichEpubChapter>,
     onlyShowImages: Boolean = false
 ) {
-    LaunchedEffect(progress, chapters) {
+    LaunchedEffect(progress, chapters, onlyShowImages) {
         if (progress != null && chapters.isNotEmpty()) {
             try {
+                // Calculate expected total items for validation
+                val expectedTotalItems = if (onlyShowImages) {
+                    chapters.sumOf { chapter ->
+                        chapter.elements.count { it is ContentElement.Image }
+                    }
+                } else {
+                    chapters.sumOf { it.elements.size }
+                } + 1 // +1 for the bottom padding item
+
+                // Wait for layout to populate with expected content
+                var attempts = 0
+                while (attempts < MAX_RESTORATION_ATTEMPTS &&
+                       scrollState.layoutInfo.totalItemsCount < expectedTotalItems - 1
+                ) {
+                    kotlinx.coroutines.delay(RESTORATION_DELAY_MS)
+                    attempts++
+                }
+
                 val targetIndex = calculateAbsoluteItemIndex(
                     chapterIndex = progress.currentChapterIndex,
                     elementIndex = progress.currentElementIndex,
@@ -161,10 +182,14 @@ fun RestoreReadingPosition(
                     onlyShowImages = onlyShowImages
                 )
 
-                if (targetIndex < scrollState.layoutInfo.totalItemsCount) {
+                // Add safety bounds check
+                val totalItemsCount = scrollState.layoutInfo.totalItemsCount
+                if (totalItemsCount > 0 && targetIndex < totalItemsCount) {
+                    // Ensure we don't overshoot
+                    val safeIndex = targetIndex.coerceAtMost(totalItemsCount - 1)
                     scrollState.scrollToItem(
-                        index = targetIndex,
-                        scrollOffset = progress.scrollOffset
+                        index = safeIndex,
+                        scrollOffset = progress.scrollOffset.coerceAtLeast(0)
                     )
                 }
             } catch (@Suppress("TooGenericExceptionCaught") ignored: Exception) {

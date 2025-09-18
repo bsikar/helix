@@ -25,6 +25,8 @@ class ReadingProgressRepository private constructor(private val context: Context
     private val _recentBooks = MutableStateFlow<List<ReadingProgress>>(emptyList())
     val recentBooks: Flow<List<ReadingProgress>> = _recentBooks.asStateFlow()
 
+    private val userPreferences = UserPreferences.getInstance(context)
+
     private val progressDir: File by lazy {
         File(context.filesDir, "reading_progress").apply {
             if (!exists()) mkdirs()
@@ -48,7 +50,6 @@ class ReadingProgressRepository private constructor(private val context: Context
             }
         }
 
-private const val MAX_RECENT_BOOKS = 1
         private const val CLEANUP_DAYS = 90
         private const val HOURS_IN_DAY = 24
         private const val MINUTES_IN_HOUR = 60
@@ -59,6 +60,13 @@ private const val MAX_RECENT_BOOKS = 1
     init {
         // Load recent books on initialization
         loadRecentBooks()
+
+        // Watch for changes in user preferences and reload recent books
+        CoroutineScope(Dispatchers.IO).launch {
+            userPreferences.recentBooksCount.collect {
+                loadRecentBooks()
+            }
+        }
     }
 
     /**
@@ -303,8 +311,9 @@ private const val MAX_RECENT_BOOKS = 1
         // Add to beginning
         currentList.add(0, progress)
 
-        // Limit size
-        while (currentList.size > MAX_RECENT_BOOKS) {
+        // Limit size to user preference
+        val maxRecentBooks = userPreferences.recentBooksCount.value
+        while (currentList.size > maxRecentBooks) {
             currentList.removeAt(currentList.size - 1)
         }
 
@@ -316,7 +325,8 @@ private const val MAX_RECENT_BOOKS = 1
             // Load in background and update flow
             CoroutineScope(Dispatchers.IO).launch {
                 val allProgress = getAllProgress()
-                val recent = allProgress.take(MAX_RECENT_BOOKS)
+                val maxRecentBooks = userPreferences.recentBooksCount.value
+                val recent = allProgress.take(maxRecentBooks)
                 _recentBooks.value = recent
             }
         } catch (@Suppress("TooGenericExceptionCaught") ignored: Exception) {

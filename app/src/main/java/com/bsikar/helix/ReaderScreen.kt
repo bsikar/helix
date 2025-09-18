@@ -1,5 +1,7 @@
 package com.bsikar.helix
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,8 +21,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomAppBar
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -28,6 +34,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -58,10 +66,11 @@ private const val CHAPTER_PRELOAD_THRESHOLD = 10
 private const val SCROLL_JUMP_THRESHOLD = 5
 private const val TEXT_KEY_LENGTH = 50
 private const val PERCENTAGE_MULTIPLIER = 100
+private const val STABILIZATION_DELAY_MS = 500L
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-@Suppress("FunctionNaming", "LongMethod", "CyclomaticComplexMethod")
+@Suppress("FunctionNaming", "LongMethod", "CyclomaticComplexMethod", "NestedBlockDepth")
 fun ReaderScreen(bookPath: String, navController: NavController, userPreferences: UserPreferences) {
     val fontSize by userPreferences.fontSize.collectAsState()
     val lineHeight by userPreferences.lineHeight.collectAsState()
@@ -77,7 +86,10 @@ fun ReaderScreen(bookPath: String, navController: NavController, userPreferences
     val epubFile = remember { mutableStateOf<File?>(null) }
     val scrollState = rememberLazyListState()
     var readingProgress by remember { mutableStateOf<ReadingProgress?>(null) }
+    var hasRestoredPosition by remember { mutableStateOf(false) }
+    val lastBookPath = remember { mutableStateOf("") }
     var currentChapterIndex by remember { mutableStateOf(0) }
+    var showGotoChapterDialog by remember { mutableStateOf(false) }
 
     var scrollStabilizationEnabled by remember { mutableStateOf(true) }
     var lastScrollPosition by remember { mutableStateOf(0) }
@@ -143,6 +155,11 @@ fun ReaderScreen(bookPath: String, navController: NavController, userPreferences
     }
 
     LaunchedEffect(bookPath) {
+        // Only reset restoration flag when actually switching to a different book
+        if (lastBookPath.value != bookPath) {
+            hasRestoredPosition = false
+            lastBookPath.value = bookPath
+        }
         try {
             val decodedPath = URLDecoder.decode(bookPath, "UTF-8")
             val file = File(decodedPath)
@@ -163,8 +180,18 @@ fun ReaderScreen(bookPath: String, navController: NavController, userPreferences
                 return@LaunchedEffect
             }
 
-            val parser = EpubParser()
-            val content = parser.parseRichContent(file)
+            // Try to get cached content first
+            val cachedContent = EpubContentCache.getCachedContent(file)
+            val content = if (cachedContent != null) {
+                // Use cached content - instant loading
+                cachedContent
+            } else {
+                // Parse and cache new content
+                val parser = EpubParser()
+                val parsed = parser.parseRichContent(file)
+                EpubContentCache.cacheContent(file, parsed)
+                parsed
+            }
 
             richEpubContent.value = content
             isLoading.value = false
@@ -197,7 +224,12 @@ fun ReaderScreen(bookPath: String, navController: NavController, userPreferences
             if (targetChapterIndex in 0 until content.chapters.size) {
                 var itemCount = 0
                 for (i in 0 until targetChapterIndex) {
-                    itemCount += content.chapters[i].elements.size
+                    val chapterSize = if (onlyShowImages) {
+                        content.chapters[i].elements.count { it is ContentElement.Image }
+                    } else {
+                        content.chapters[i].elements.size
+                    }
+                    itemCount += chapterSize
                 }
                 coroutineScope.launch {
                     scrollState.animateScrollToItem(itemCount)
@@ -234,12 +266,27 @@ fun ReaderScreen(bookPath: String, navController: NavController, userPreferences
                 }
             )
 
-            RestoreReadingPosition(
-                scrollState = scrollState,
-                progress = readingProgress,
-                chapters = content.chapters,
-                onlyShowImages = onlyShowImages
-            )
+            // Only restore position if we haven't already and the scroll state is at the beginning
+            // This prevents restoration when user has already navigated and comes back from settings
+            val isAtBeginning = scrollState.firstVisibleItemIndex == 0 &&
+                               scrollState.firstVisibleItemScrollOffset == 0
+
+            if (!hasRestoredPosition && readingProgress != null && isAtBeginning) {
+                // Temporarily disable scroll stabilization during restoration
+                scrollStabilizationEnabled = false
+                RestoreReadingPosition(
+                    scrollState = scrollState,
+                    progress = readingProgress,
+                    chapters = content.chapters,
+                    onlyShowImages = onlyShowImages
+                )
+                hasRestoredPosition = true
+                // Re-enable after a short delay
+                coroutineScope.launch {
+                    kotlinx.coroutines.delay(STABILIZATION_DELAY_MS)
+                    scrollStabilizationEnabled = true
+                }
+            }
         }
     }
 
@@ -298,19 +345,34 @@ fun ReaderScreen(bookPath: String, navController: NavController, userPreferences
                             )
                         }
 
-                        // Progress Information
+                        // Progress Information - Clickable to open goto chapter dialog
                         Column(
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .combinedClickable(
+                                    onClick = { showGotoChapterDialog = true }
+                                ),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             val (chapterIndex, chapterTitle, totalChapters) = currentChapterInfo
 
                             // Show current scroll position for chapter
-                            Text(
-                                text = "Chapter ${chapterIndex + 1} of $totalChapters",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.List,
+                                    contentDescription = "Go to Chapter",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Chapter ${chapterIndex + 1} of $totalChapters",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
 
                             // Calculate current reading percentage based on current position
                             val currentProgress = if (totalChapters > 0) {
@@ -400,8 +462,8 @@ fun ReaderScreen(bookPath: String, navController: NavController, userPreferences
                                 }
                             }
                         }
-                        // Only update last position if user is actively scrolling
-                        if (scrollState.isScrollInProgress) {
+                        // Update last position if user is actively scrolling OR if stabilization is disabled
+                        if (scrollState.isScrollInProgress || !scrollStabilizationEnabled) {
                             lastScrollPosition = currentPosition
                         }
                     }
@@ -457,4 +519,122 @@ fun ReaderScreen(bookPath: String, navController: NavController, userPreferences
             }
         }
     }
+
+    // Goto Chapter Dialog
+    if (showGotoChapterDialog) {
+        GotoChapterDialog(
+            chapters = richEpubContent.value?.chapters ?: emptyList(),
+            currentChapterIndex = currentChapterIndex,
+            onDismiss = { showGotoChapterDialog = false },
+            onChapterSelected = { chapterIndex ->
+                navigateToChapter(chapterIndex)
+                showGotoChapterDialog = false
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+@Suppress("FunctionNaming", "LongMethod")
+private fun GotoChapterDialog(
+    chapters: List<RichEpubChapter>,
+    currentChapterIndex: Int,
+    onDismiss: () -> Unit,
+    onChapterSelected: (Int) -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+
+    // Filter chapters based on search query
+    val filteredChapters = remember(chapters, searchQuery) {
+        if (searchQuery.isBlank()) {
+            chapters.mapIndexed { index, chapter -> index to chapter }
+        } else {
+            chapters.mapIndexed { index, chapter -> index to chapter }
+                .filter { (index, chapter) ->
+                    val chapterNumber = (index + 1).toString()
+                    val chapterTitle = chapter.title.lowercase()
+                    val query = searchQuery.lowercase()
+
+                    chapterNumber.contains(query) || chapterTitle.contains(query)
+                }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text(
+                    text = "Go to Chapter",
+                    style = MaterialTheme.typography.headlineSmall
+                )
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    label = { Text("Search chapter # or title") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    singleLine = true
+                )
+            }
+        },
+        text = {
+            LazyColumn(
+                modifier = Modifier.height(400.dp)
+            ) {
+                items(filteredChapters.size) { itemIndex ->
+                    val (chapterIndex, chapter) = filteredChapters[itemIndex]
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp)
+                            .combinedClickable(
+                                onClick = { onChapterSelected(chapterIndex) }
+                            ),
+                        colors = if (chapterIndex == currentChapterIndex) {
+                            CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer
+                            )
+                        } else {
+                            CardDefaults.cardColors()
+                        }
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp)
+                        ) {
+                            Text(
+                                text = "Chapter ${chapterIndex + 1}",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = if (chapterIndex == currentChapterIndex) {
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                }
+                            )
+                            if (chapter.title.isNotEmpty()) {
+                                Text(
+                                    text = chapter.title,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (chapterIndex == currentChapterIndex) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
 }
