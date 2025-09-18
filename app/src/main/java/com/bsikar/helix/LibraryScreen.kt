@@ -1,10 +1,9 @@
+@file:Suppress("LongMethod", "TooManyFunctions", "MatchingDeclarationName")
 package com.bsikar.helix
 
-import android.content.Intent
-import android.os.Environment
+import android.net.Uri
+import android.provider.DocumentsContract
 import android.provider.Settings
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -32,6 +31,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -44,7 +44,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -55,9 +60,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import com.bsikar.helix.data.LibraryRepository
 import java.io.File
 import java.net.URLEncoder
-import androidx.core.net.toUri
+
+data class EpubItem(
+    val uri: Uri,
+    val displayName: String,
+    val resolvedFile: File?
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,24 +76,46 @@ import androidx.core.net.toUri
 fun LibraryScreen(navController: NavController) {
     val context = LocalContext.current
     val progressRepository = remember { ReadingProgressRepository.getInstance(context) }
-    val recentBooks by progressRepository.recentBooks.collectAsState(initial = emptyList())
+    val libraryRepository = remember { LibraryRepository.getInstance(context) }
+    val userPreferences = remember { com.bsikar.helix.data.UserPreferences.getInstance(context) }
+    val allRecentBooks by progressRepository.recentBooks.collectAsState(initial = emptyList())
+    val librarySources by libraryRepository.librarySources.collectAsState()
+    val excludedBooks by libraryRepository.excludedBooks.collectAsState()
+    val recentBooksCount by userPreferences.recentBooksCount.collectAsState()
 
-    var epubFiles by remember { mutableStateOf<List<File>>(emptyList()) }
-    var permissionStatus by remember { mutableStateOf("Checking permissions...") }
+    var epubItems by remember { mutableStateOf<List<EpubItem>>(emptyList()) }
     var searchQuery by remember { mutableStateOf("") }
     var isSearchVisible by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
-    val updateFiles = { epubFiles = findEpubFiles() }
-    val updatePermissionStatus = { status: String -> permissionStatus = status }
-
-    createPermissionLauncher(updatePermissionStatus, updateFiles)
-    val settingsLauncher = createSettingsLauncher(updatePermissionStatus, updateFiles)
-
-    HandlePermissions(updatePermissionStatus, updateFiles)
-
-    val filteredFiles = epubFiles.filter {
-        it.name.lowercase().contains(searchQuery.lowercase())
+    val updateFiles = {
+        scope.launch {
+            isLoading = true
+            try {
+                val newItems = withContext(Dispatchers.IO) {
+                    scanLibrarySourcesWithMetadata(context, libraryRepository)
+                }
+                epubItems = newItems
+            } finally {
+                isLoading = false
+            }
+        }
     }
+
+    LaunchedEffect(librarySources) {
+        updateFiles()
+    }
+
+    val filteredItems = epubItems.filter { item ->
+        item.displayName.lowercase().contains(searchQuery.lowercase()) &&
+        !libraryRepository.isBookExcluded(item.uri)
+    }
+
+    // Filter recent books to only show those that exist in current library sources
+    val filteredRecentBooks = allRecentBooks.filter { progress ->
+        isBookInLibraryItems(progress.epubPath, epubItems)
+    }.take(recentBooksCount)
 
     Column(
         modifier = Modifier
@@ -158,15 +191,13 @@ fun LibraryScreen(navController: NavController) {
             )
         }
 
-        if (filteredFiles.isEmpty() && epubFiles.isNotEmpty()) {
+        if (isLoading) {
+            LoadingStateView()
+        } else if (filteredItems.isEmpty() && epubItems.isNotEmpty()) {
             EmptySearchStateView()
-        } else if (epubFiles.isEmpty()) {
+        } else if (epubItems.isEmpty()) {
             EmptyStateView(
-                onGrantPermission = {
-                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
-                    intent.data = "package:${context.packageName}".toUri()
-                    settingsLauncher.launch(intent)
-                }
+                onAddBooks = { navController.navigate("settings") }
             )
         } else {
             LazyColumn(
@@ -177,7 +208,7 @@ fun LibraryScreen(navController: NavController) {
                 if (searchQuery.isEmpty()) {
                     item {
                         RecentBooksSection(
-                            recentBooks = recentBooks,
+                            recentBooks = filteredRecentBooks,
                             onBookClick = { bookPath ->
                                 val encodedPath = URLEncoder.encode(bookPath, "UTF-8")
                                 navController.navigate("reader/$encodedPath")
@@ -189,13 +220,18 @@ fun LibraryScreen(navController: NavController) {
                 }
 
                 // Show all available books
-                items(filteredFiles) { file ->
+                items(filteredItems) { item ->
                     BookCard(
-                        bookName = file.name,
-                        filePath = file.absolutePath,
-                        onClick = {
-                            val encodedPath = URLEncoder.encode(file.absolutePath, "UTF-8")
-                            navController.navigate("reader/$encodedPath")
+                        uri = item.uri,
+                        displayName = item.displayName,
+                        onBookClick = {
+                            item.resolvedFile?.let { file ->
+                                val encodedPath = URLEncoder.encode(file.absolutePath, "UTF-8")
+                                navController.navigate("reader/$encodedPath")
+                            }
+                        },
+                        onBookHide = {
+                            libraryRepository.addExcludedBook(item.uri)
                         }
                     )
                 }
@@ -206,19 +242,21 @@ fun LibraryScreen(navController: NavController) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-@Suppress("FunctionNaming")
+@Suppress("FunctionNaming", "LongMethod")
 private fun BookCard(
-    bookName: String,
-    filePath: String,
-    onClick: () -> Unit
+    uri: Uri,
+    displayName: String,
+    onBookClick: () -> Unit,
+    onBookHide: () -> Unit
 ) {
+    val context = LocalContext.current
     var showDialog by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(
-                onClick = onClick,
+                onClick = onBookClick,
                 onLongClick = { showDialog = true }
             ),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
@@ -230,11 +268,26 @@ private fun BookCard(
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            BookCoverImage(
-                epubFile = File(filePath),
-                size = 48.dp,
-                cornerRadius = 8.dp
-            )
+            val file = UriFileResolver.resolveUriToFile(context, uri)
+            if (file != null) {
+                BookCoverImage(
+                    epubFile = file,
+                    size = 48.dp,
+                    cornerRadius = 8.dp
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "📚",
+                        fontSize = 24.sp
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.width(12.dp))
 
@@ -244,7 +297,7 @@ private fun BookCard(
                     .fillMaxWidth()
             ) {
                 Text(
-                    text = bookName.removeSuffix(".epub"),
+                    text = displayName.removeSuffix(".epub"),
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -267,9 +320,49 @@ private fun BookCard(
 
     // Show book info dialog on long press
     if (showDialog) {
-        BookInfoDialog(
-            epubFile = File(filePath),
-            onDismiss = { showDialog = false }
+        val file = UriFileResolver.resolveUriToFile(context, uri)
+        if (file != null) {
+            BookInfoDialog(
+                epubFile = file,
+                onDismiss = { showDialog = false },
+                onHide = {
+                    onBookHide()
+                    showDialog = false
+                }
+            )
+        }
+    }
+}
+
+@Composable
+@Suppress("FunctionNaming")
+private fun LoadingStateView() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(48.dp)
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text(
+            text = "Scanning library sources...",
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = "This may take a moment for large folders",
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
         )
     }
 }
@@ -325,7 +418,7 @@ private fun EmptySearchStateView() {
 @Composable
 @Suppress("FunctionNaming")
 private fun EmptyStateView(
-    onGrantPermission: () -> Unit
+    onAddBooks: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -364,76 +457,221 @@ private fun EmptyStateView(
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "Add EPUB files to your Downloads folder to get started",
+            text = "Add folders or EPUB files to your library to get started",
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
 
-        if (!Environment.isExternalStorageManager()) {
-            Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
-            Button(
-                onClick = onGrantPermission,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text("Grant Storage Permission")
+        Button(
+            onClick = onAddBooks,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Text("Add Books to Library")
+        }
+    }
+}
+
+@Suppress("NestedBlockDepth")
+private suspend fun scanLibrarySourcesWithMetadata(
+    context: android.content.Context,
+    libraryRepository: LibraryRepository
+): List<EpubItem> {
+    val epubItems = mutableListOf<EpubItem>()
+    val sourceUris = libraryRepository.getLibrarySourceUris()
+
+    for (sourceUri in sourceUris) {
+        kotlinx.coroutines.yield() // Allow other coroutines to run
+        try {
+            if (isDirectoryUri(sourceUri)) {
+                epubItems.addAll(scanDirectoryForEpubsWithMetadata(context, sourceUri))
+            } else {
+                val fileName = getDisplayNameFromUri(context, sourceUri) ?: ""
+                if (fileName.endsWith(".epub", ignoreCase = true)) {
+                    val resolvedFile = UriFileResolver.resolveUriToFile(context, sourceUri)
+                    epubItems.add(EpubItem(sourceUri, fileName, resolvedFile))
+                }
+            }
+        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    return epubItems.distinctBy { it.uri }
+}
+
+@Suppress("NestedBlockDepth")
+private suspend fun scanLibrarySources(
+    context: android.content.Context,
+    libraryRepository: LibraryRepository
+): List<Uri> {
+    val epubUris = mutableListOf<Uri>()
+    val sourceUris = libraryRepository.getLibrarySourceUris()
+
+    for (sourceUri in sourceUris) {
+        kotlinx.coroutines.yield() // Allow other coroutines to run
+        try {
+            if (isDirectoryUri(sourceUri)) {
+                epubUris.addAll(scanDirectoryForEpubs(context, sourceUri))
+            } else {
+                val fileName = getDisplayNameFromUri(context, sourceUri) ?: ""
+                if (fileName.endsWith(".epub", ignoreCase = true)) {
+                    epubUris.add(sourceUri)
+                }
+            }
+        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    return epubUris.distinct()
+}
+
+private fun isDirectoryUri(uri: Uri): Boolean {
+    return uri.toString().contains("/tree/")
+}
+
+@Suppress("NestedBlockDepth")
+private suspend fun scanDirectoryForEpubsWithMetadata(
+    context: android.content.Context,
+    directoryUri: Uri
+): List<EpubItem> {
+    val epubItems = mutableListOf<EpubItem>()
+
+    try {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+            directoryUri, DocumentsContract.getTreeDocumentId(directoryUri)
+        )
+
+        context.contentResolver.query(childrenUri, null, null, null, null)?.use { cursor ->
+            while (cursor.moveToNext()) {
+                kotlinx.coroutines.yield() // Allow other coroutines to run between each file
+
+                val documentId = cursor.getString(
+                    cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                )
+                val displayName = cursor.getString(
+                    cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                )
+                val mimeType = cursor.getString(
+                    cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                )
+
+                val documentUri = DocumentsContract.buildDocumentUriUsingTree(directoryUri, documentId)
+
+                if (mimeType == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    epubItems.addAll(scanDirectoryForEpubsWithMetadata(context, documentUri))
+                } else if (displayName?.endsWith(".epub", ignoreCase = true) == true) {
+                    val resolvedFile = UriFileResolver.resolveUriToFile(context, documentUri)
+                    epubItems.add(EpubItem(documentUri, displayName, resolvedFile))
+                }
             }
         }
+    } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+        e.printStackTrace()
+    }
+
+    return epubItems
+}
+
+@Suppress("NestedBlockDepth")
+private suspend fun scanDirectoryForEpubs(context: android.content.Context, directoryUri: Uri): List<Uri> {
+    val epubUris = mutableListOf<Uri>()
+
+    try {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+            directoryUri, DocumentsContract.getTreeDocumentId(directoryUri)
+        )
+
+        context.contentResolver.query(childrenUri, null, null, null, null)?.use { cursor ->
+            while (cursor.moveToNext()) {
+                kotlinx.coroutines.yield() // Allow other coroutines to run between each file
+
+                val documentId = cursor.getString(
+                    cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                )
+                val displayName = cursor.getString(
+                    cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                )
+                val mimeType = cursor.getString(
+                    cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                )
+
+                val documentUri = DocumentsContract.buildDocumentUriUsingTree(directoryUri, documentId)
+
+                if (mimeType == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    epubUris.addAll(scanDirectoryForEpubs(context, documentUri))
+                } else if (displayName?.endsWith(".epub", ignoreCase = true) == true) {
+                    epubUris.add(documentUri)
+                }
+            }
+        }
+    } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+        e.printStackTrace()
+    }
+
+    return epubUris
+}
+
+@Suppress("NestedBlockDepth")
+private fun getDisplayNameFromUri(context: android.content.Context, uri: Uri): String? {
+    return try {
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (nameIndex >= 0) {
+                    cursor.getString(nameIndex)
+                } else {
+                    null
+                }
+            } else {
+                null
+            }
+        }
+    } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+        null
     }
 }
 
-@Composable
-@Suppress("FunctionNaming")
-private fun createPermissionLauncher(
-    updatePermissionStatus: (String) -> Unit,
-    updateFiles: () -> Unit
-) = rememberLauncherForActivityResult(
-    contract = ActivityResultContracts.RequestPermission(),
-    onResult = { isGranted: Boolean ->
-        if (isGranted) {
-            updatePermissionStatus("Permission granted")
-            updateFiles()
-        } else {
-            updatePermissionStatus("Permission denied")
+private fun isBookInLibraryItems(
+    bookPath: String,
+    availableItems: List<EpubItem>
+): Boolean {
+    val bookFile = File(bookPath)
+
+    // Check if the book file exists
+    if (!bookFile.exists()) {
+        return false
+    }
+
+    // Check if any of the available items point to this book (already resolved during scanning)
+    return availableItems.any { item ->
+        item.resolvedFile?.absolutePath == bookPath
+    }
+}
+
+private fun isBookInLibrarySources(
+    bookPath: String,
+    availableUris: List<Uri>,
+    context: android.content.Context
+): Boolean {
+    val bookFile = File(bookPath)
+
+    // Check if the book file exists
+    if (!bookFile.exists()) {
+        return false
+    }
+
+    // Check if any of the available URIs point to this book
+    return availableUris.any { uri ->
+        try {
+            val resolvedFile = UriFileResolver.resolveUriToFile(context, uri)
+            resolvedFile?.absolutePath == bookFile.absolutePath
+        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+            false
         }
     }
-)
-
-@Composable
-@Suppress("FunctionNaming")
-private fun createSettingsLauncher(
-    updatePermissionStatus: (String) -> Unit,
-    updateFiles: () -> Unit
-) = rememberLauncherForActivityResult(
-    contract = ActivityResultContracts.StartActivityForResult()
-) {
-    if (Environment.isExternalStorageManager()) {
-        updatePermissionStatus("External storage manager permission granted")
-        updateFiles()
-    } else {
-        updatePermissionStatus("Need external storage manager permission (Android 11+)")
-    }
-}
-
-@Composable
-@Suppress("FunctionNaming")
-private fun HandlePermissions(
-    updatePermissionStatus: (String) -> Unit,
-    updateFiles: () -> Unit
-) {
-    LaunchedEffect(Unit) {
-        if (Environment.isExternalStorageManager()) {
-            updatePermissionStatus("External storage manager permission granted")
-            updateFiles()
-        } else {
-            updatePermissionStatus("Need external storage manager permission (Android 11+)")
-        }
-    }
-}
-
-private fun findEpubFiles(): List<File> {
-    val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-    return downloadsDir.walk().filter { it.isFile && it.extension == "epub" }.toList()
 }

@@ -49,6 +49,7 @@ import java.io.File
 fun BookInfoDialog(
     epubFile: File,
     onDismiss: () -> Unit,
+    onHide: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -69,8 +70,17 @@ fun BookInfoDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false),
         modifier = modifier.padding(16.dp),
         confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Close")
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (onHide != null) {
+                    TextButton(onClick = onHide) {
+                        Text("Hide Book")
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("Close")
+                }
             }
         },
         title = {

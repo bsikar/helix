@@ -48,6 +48,9 @@ class UserPreferences private constructor(context: Context) {
     private val _accentColor = MutableStateFlow(Color(prefs.getInt(KEY_ACCENT_COLOR, DEFAULT_ACCENT_COLOR.toArgb())))
     val accentColor: StateFlow<Color> = _accentColor.asStateFlow()
 
+    private val _recentBooksCount = MutableStateFlow(prefs.getInt(KEY_RECENT_BOOKS_COUNT, DEFAULT_RECENT_BOOKS_COUNT))
+    val recentBooksCount: StateFlow<Int> = _recentBooksCount.asStateFlow()
+
     fun setFontSize(size: Float) {
         _fontSize.value = size
         prefs.edit { putFloat(KEY_FONT_SIZE, size) }
@@ -73,15 +76,22 @@ class UserPreferences private constructor(context: Context) {
         prefs.edit { putInt(KEY_ACCENT_COLOR, color.toArgb()) }
     }
 
+    fun setRecentBooksCount(count: Int) {
+        _recentBooksCount.value = count
+        prefs.edit { putInt(KEY_RECENT_BOOKS_COUNT, count) }
+    }
+
     companion object {
         private const val KEY_FONT_SIZE = "font_size"
         private const val KEY_LINE_HEIGHT = "line_height"
         private const val KEY_ONLY_SHOW_IMAGES = "only_show_images"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_ACCENT_COLOR = "accent_color"
+        private const val KEY_RECENT_BOOKS_COUNT = "recent_books_count"
         private const val DEFAULT_FONT_SIZE = 16f
         private const val DEFAULT_LINE_HEIGHT = 1.5f
         private const val DEFAULT_ONLY_SHOW_IMAGES = false
+        private const val DEFAULT_RECENT_BOOKS_COUNT = 3
         val DEFAULT_THEME_MODE = ThemeMode.SYSTEM
         @Suppress("MagicNumber")
         val DEFAULT_ACCENT_COLOR = Color(0xFF6200EE) // Purple500
