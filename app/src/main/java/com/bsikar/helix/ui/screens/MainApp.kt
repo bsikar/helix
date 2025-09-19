@@ -45,41 +45,43 @@ fun MainApp(
             )
         }
         else -> {
-        when (selectedTab) {
-            0 -> LibraryScreen(
-                selectedTab = selectedTab,
-                onTabSelected = { selectedTab = it },
-                currentTheme = currentTheme,
-                onThemeChange = onThemeChange,
-                theme = theme,
-                onNavigateToSettings = { showSettings = true },
-                onBookClick = { book -> currentBook = book }
-            )
-            1 -> RecentsScreen(
-                selectedTab = selectedTab,
-                onTabSelected = { selectedTab = it },
-                theme = theme,
-                onNavigateToSettings = { showSettings = true },
-                onBookClick = { book -> currentBook = book }
-            )
-            2 -> BrowseScreen(
-                selectedTab = selectedTab,
-                onTabSelected = { selectedTab = it },
-                theme = theme,
-                onNavigateToSettings = { showSettings = true },
-                onBookClick = { book -> currentBook = book },
-                onSeeAllClick = { title, books -> seeAllData = title to books }
-            )
-            else -> LibraryScreen(
-                selectedTab = selectedTab,
-                onTabSelected = { selectedTab = it },
-                currentTheme = currentTheme,
-                onThemeChange = onThemeChange,
-                theme = theme,
-                onNavigateToSettings = { showSettings = true },
-                onBookClick = { book -> currentBook = book }
-            )
-        }
+            when (selectedTab) {
+                0 -> LibraryScreen(
+                    selectedTab = selectedTab,
+                    onTabSelected = { selectedTab = it },
+                    currentTheme = currentTheme,
+                    onThemeChange = onThemeChange,
+                    theme = theme,
+                    onNavigateToSettings = { showSettings = true },
+                    onBookClick = { book -> currentBook = book },
+                    onSeeAllClick = { title, books -> seeAllData = title to books }
+                )
+                1 -> RecentsScreen(
+                    selectedTab = selectedTab,
+                    onTabSelected = { selectedTab = it },
+                    theme = theme,
+                    onNavigateToSettings = { showSettings = true },
+                    onBookClick = { book -> currentBook = book }
+                )
+                2 -> BrowseScreen(
+                    selectedTab = selectedTab,
+                    onTabSelected = { selectedTab = it },
+                    theme = theme,
+                    onNavigateToSettings = { showSettings = true },
+                    onBookClick = { book -> currentBook = book },
+                    onSeeAllClick = { title, books -> seeAllData = title to books }
+                )
+                else -> LibraryScreen(
+                    selectedTab = selectedTab,
+                    onTabSelected = { selectedTab = it },
+                    currentTheme = currentTheme,
+                    onThemeChange = onThemeChange,
+                    theme = theme,
+                    onNavigateToSettings = { showSettings = true },
+                    onBookClick = { book -> currentBook = book },
+                    onSeeAllClick = { title, books -> seeAllData = title to books }
+                )
+            }
         }
     }
 }

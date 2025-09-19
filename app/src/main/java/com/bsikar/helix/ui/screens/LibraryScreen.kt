@@ -1,9 +1,9 @@
 package com.bsikar.helix.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.*
@@ -11,17 +11,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bsikar.helix.data.Book
 import com.bsikar.helix.theme.AppTheme
-import com.bsikar.helix.theme.ThemeManager
 import com.bsikar.helix.theme.ThemeMode
-import com.bsikar.helix.ui.components.BookCard
 import com.bsikar.helix.ui.components.InfiniteHorizontalBookScroll
 import com.bsikar.helix.ui.components.SearchBar
 
@@ -34,35 +32,26 @@ fun LibraryScreen(
     onThemeChange: (ThemeMode) -> Unit,
     theme: AppTheme,
     onNavigateToSettings: () -> Unit = {},
-    onBookClick: (Book) -> Unit = {}
+    onBookClick: (Book) -> Unit = {},
+    onSeeAllClick: (String, List<Book>) -> Unit = { _, _ -> }
 ) {
-    // Step 2: Manage search state here
     var searchQuery by remember { mutableStateOf("") }
-    
-    // Sort states
+
     var readingSortAscending by remember { mutableStateOf(false) }
     var planToReadSortAscending by remember { mutableStateOf(true) }
     var readSortAscending by remember { mutableStateOf(true) }
 
-    // Step 3: Create filtered lists with sort applied (from recents - most recent to least)
     val allRecentBooks = remember {
         listOf(
-            Book("Kaguya-sama", "Aka Akasaka", Color(0xFFFF69B4), 0.6f), // Most recent
+            Book("Kaguya-sama", "Aka Akasaka", Color(0xFFFF69B4), 0.6f),
             Book("Clockwork Planet", "Yuu Kamiya", Color(0xFFFFD700), 0.8f),
             Book("Akame ga Kill!", "Takahiro", Color(0xFF8B0000), 0.3f),
             Book("Dr. Stone", "Riichiro Inagaki", Color(0xFF00CED1), 0.4f),
             Book("Fire Force", "Atsushi Ohkubo", Color(0xFFDC143C), 0.7f),
-            Book("Black Clover", "Yuki Tabata", Color(0xFF2F4F4F), 0.2f) // Least recent
+            Book("Black Clover", "Yuki Tabata", Color(0xFF2F4F4F), 0.2f)
         )
     }
-    
-    // Calculate how many books fit on screen for Reading section
-    val booksVisibleOnScreen = 4 // Conservative estimate for most screens
-    
-    // Take only the books that fit on screen (most recent first)
-    val readingBooks = remember(allRecentBooks) {
-        allRecentBooks.take(booksVisibleOnScreen)
-    }
+
     val planToReadBooks = remember {
         listOf(
             Book("Akane-Banashi", "Yuki Suenaga", Color(0xFF4169E1)),
@@ -83,24 +72,37 @@ fun LibraryScreen(
             Book("Mob Psycho 100", "ONE", Color(0xFF9932CC), 1.0f),
             Book("Demon Slayer", "Koyoharu Gotouge", Color(0xFF2E8B57), 1.0f),
             Book("My Hero Academia", "Kohei Horikoshi", Color(0xFF32CD32), 1.0f),
-            Book("Bleach", "Tite Kubo", Color(0xFF4B0082), 1.0f)
+            Book("Bleach", "Tite Kubo", Color(0xFF4B0082), 1.0f),
+            Book("Naruto", "Masashi Kishimoto", Color(0xFFFF8C00), 1.0f),
+            Book("One Piece", "Eiichiro Oda", Color(0xFF4169E1), 1.0f),
+            Book("Dragon Ball", "Akira Toriyama", Color(0xFFDB4437), 1.0f),
+            Book("Berserk", "Kentaro Miura", Color(0xFF424242), 1.0f),
+            Book("Vagabond", "Takehiko Inoue", Color(0xFF795548), 1.0f),
+            Book("Slam Dunk", "Takehiko Inoue", Color(0xFFD32F2F), 1.0f),
+            Book("JoJo's Bizarre Adventure", "Hirohiko Araki", Color(0xFFFF6347), 1.0f),
+            Book("The Promised Neverland", "Kaiu Shirai", Color(0xFF8FBC8F), 1.0f),
+            Book("Haikyuu!!", "Haruichi Furudate", Color(0xFFFF7F50), 1.0f),
+            Book("Spy x Family", "Tatsuya Endo", Color(0xFFFF1493), 1.0f),
+            Book("Chainsaw Man", "Tatsuki Fujimoto", Color(0xFFFF4500), 1.0f),
+            Book("Jujutsu Kaisen", "Gege Akutami", Color(0xFF8A2BE2), 1.0f),
+            Book("Vinland Saga", "Makoto Yukimura", Color(0xFFC0C0C0), 1.0f),
+            Book("Blue Lock", "Muneyuki Kaneshiro", Color(0xFF0000FF), 1.0f)
         )
     }
 
-    val filteredReadingBooks = remember(searchQuery, readingBooks, readingSortAscending) {
+    val filteredReadingBooks = remember(searchQuery, allRecentBooks, readingSortAscending) {
         val filtered = if (searchQuery.isBlank()) {
-            readingBooks
+            allRecentBooks
         } else {
-            readingBooks.filter { book ->
+            allRecentBooks.filter { book ->
                 book.title.contains(searchQuery, ignoreCase = true) ||
                         book.author.contains(searchQuery, ignoreCase = true)
             }
         }
-        // Sort by recency (books are already ordered by most recent first in allRecentBooks)
         if (readingSortAscending) {
-            filtered.reversed() // Least recent first
+            filtered.reversed()
         } else {
-            filtered // Most recent first (default order)
+            filtered
         }
     }
 
@@ -113,7 +115,6 @@ fun LibraryScreen(
                         book.author.contains(searchQuery, ignoreCase = true)
             }
         }
-        // Sort by title
         if (planToReadSortAscending) {
             filtered.sortedBy { it.title }
         } else {
@@ -130,7 +131,6 @@ fun LibraryScreen(
                         book.author.contains(searchQuery, ignoreCase = true)
             }
         }
-        // Sort by title
         if (readSortAscending) {
             filtered.sortedBy { it.title }
         } else {
@@ -171,7 +171,6 @@ fun LibraryScreen(
                 containerColor = theme.surfaceColor,
                 tonalElevation = 8.dp
             ) {
-                // Your NavigationBarItems remain the same...
                 NavigationBarItem(
                     selected = selectedTab == 0,
                     onClick = { onTabSelected(0) },
@@ -235,14 +234,12 @@ fun LibraryScreen(
             }
         }
     ) { innerPadding ->
-        // This is now the single source of truth for vertical scrolling.
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = innerPadding,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
 
-            // Pass state to the SearchBar
             item {
                 SearchBar(
                     value = searchQuery,
@@ -251,111 +248,72 @@ fun LibraryScreen(
                 )
             }
 
-            // Show "Reading" section only if results exist
             if (filteredReadingBooks.isNotEmpty()) {
                 item {
-                    SectionHeader(
-                        title = "Reading", 
-                        subtitle = "Last read", 
+                    LibrarySectionHeader(
+                        title = "Reading",
+                        subtitle = "Last read",
                         theme = theme,
                         isAscending = readingSortAscending,
-                        onSortClick = { readingSortAscending = !readingSortAscending }
+                        onSortClick = { readingSortAscending = !readingSortAscending },
+                        onSeeAllClick = { onSeeAllClick("Reading", filteredReadingBooks) }
                     )
                 }
                 item {
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        contentPadding = PaddingValues(horizontal = 16.dp)
-                    ) {
-                        items(filteredReadingBooks) { book ->
-                            BookCard(
-                                book = book,
-                                showProgress = true,
-                                theme = theme,
-                                onBookClick = onBookClick
-                            )
-                        }
-                    }
+                    InfiniteHorizontalBookScroll(
+                        books = filteredReadingBooks,
+                        showProgress = true,
+                        theme = theme,
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        onBookClick = onBookClick
+                    )
                 }
             }
 
-            // Show "Plan to read" section only if results exist
             if (filteredPlanToReadBooks.isNotEmpty()) {
                 item {
-                    SectionHeader(
-                        title = "Plan to read", 
-                        subtitle = "Title", 
+                    LibrarySectionHeader(
+                        title = "Plan to read",
+                        subtitle = "Title",
                         theme = theme,
                         isAscending = planToReadSortAscending,
-                        onSortClick = { planToReadSortAscending = !planToReadSortAscending }
+                        onSortClick = { planToReadSortAscending = !planToReadSortAscending },
+                        onSeeAllClick = { onSeeAllClick("Plan to read", filteredPlanToReadBooks) }
                     )
                 }
-                items(filteredPlanToReadBooks.chunked(3)) { rowItems ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        for (book in rowItems) {
-                            Box(modifier = Modifier.weight(1f)) {
-                                BookCard(
-                                    book = book, 
-                                    showProgress = false, 
-                                    theme = theme,
-                                    onBookClick = onBookClick
-                                )
-                            }
-                        }
-                        // This handles cases where the last row isn't full
-                        if (rowItems.size < 3) {
-                            for (i in 0 until (3 - rowItems.size)) {
-                                Spacer(modifier = Modifier.weight(1f))
-                            }
-                        }
-                    }
+                item {
+                    InfiniteHorizontalBookScroll(
+                        books = filteredPlanToReadBooks,
+                        showProgress = false,
+                        theme = theme,
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        onBookClick = onBookClick
+                    )
                 }
             }
-            
-            // Show "Read" section only if results exist
+
             if (filteredReadBooks.isNotEmpty()) {
                 item {
-                    SectionHeader(
-                        title = "Read", 
-                        subtitle = "Title", 
+                    LibrarySectionHeader(
+                        title = "Read",
+                        subtitle = "Title",
                         theme = theme,
                         isAscending = readSortAscending,
-                        onSortClick = { readSortAscending = !readSortAscending }
+                        onSortClick = { readSortAscending = !readSortAscending },
+                        onSeeAllClick = { onSeeAllClick("Read", filteredReadBooks) }
                     )
                 }
-                items(filteredReadBooks.chunked(3)) { rowItems ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        for (book in rowItems) {
-                            Box(modifier = Modifier.weight(1f)) {
-                                BookCard(
-                                    book = book, 
-                                    showProgress = false, 
-                                    theme = theme,
-                                    onBookClick = onBookClick
-                                )
-                            }
-                        }
-                        // This handles cases where the last row isn't full
-                        if (rowItems.size < 3) {
-                            for (i in 0 until (3 - rowItems.size)) {
-                                Spacer(modifier = Modifier.weight(1f))
-                            }
-                        }
-                    }
+                item {
+                    InfiniteHorizontalBookScroll(
+                        books = filteredReadBooks,
+                        showProgress = false,
+                        theme = theme,
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        onBookClick = onBookClick
+                    )
                 }
             }
-            
-            // Optional: Show a message if no results are found at all
+
             if (filteredReadingBooks.isEmpty() && filteredPlanToReadBooks.isEmpty() && filteredReadBooks.isEmpty()) {
                 item {
                     Text(
@@ -372,69 +330,60 @@ fun LibraryScreen(
     }
 }
 
-// A new, simple composable for the section headers to reduce repetition.
 @Composable
-fun SectionHeader(
-    title: String, 
-    subtitle: String, 
+fun LibrarySectionHeader(
+    title: String,
+    subtitle: String,
     theme: AppTheme,
-    isAscending: Boolean = true,
-    onSortClick: () -> Unit = {}
+    isAscending: Boolean,
+    onSortClick: () -> Unit,
+    onSeeAllClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+            .padding(start = 16.dp, end = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = title,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = theme.primaryTextColor
-        )
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f, fill = false)
+        ) {
             Text(
-                text = subtitle,
-                fontSize = 13.sp,
-                color = theme.secondaryTextColor
+                text = title,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = theme.primaryTextColor
             )
-            IconButton(
-                onClick = onSortClick,
-                modifier = Modifier.size(24.dp)
+            Spacer(modifier = Modifier.width(8.dp))
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onSortClick)
+                    .padding(4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                Text(
+                    text = subtitle,
+                    fontSize = 13.sp,
+                    color = theme.secondaryTextColor
+                )
                 Icon(
                     if (isAscending) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                    contentDescription = "Sort ${if (isAscending) "ascending" else "descending"}",
+                    contentDescription = "Sort by $subtitle",
                     modifier = Modifier.size(16.dp),
                     tint = theme.secondaryTextColor
                 )
             }
-            IconButton(onClick = { }) {
-                Icon(
-                    Icons.Filled.Refresh,
-                    contentDescription = "Refresh",
-                    modifier = Modifier.size(18.dp),
-                    tint = theme.secondaryTextColor
-                )
-            }
         }
-    }
-}
 
-@Preview(showBackground = true)
-@Composable
-fun LibraryScreenPreview() {
-    val theme = ThemeManager.lightTheme
-    MaterialTheme {
-        LibraryScreen(
-            selectedTab = 0,
-            onTabSelected = { },
-            currentTheme = ThemeMode.LIGHT,
-            onThemeChange = { },
-            theme = theme,
-            onNavigateToSettings = { }
-        )
+        TextButton(onClick = onSeeAllClick) {
+            Text(
+                text = "See All",
+                fontSize = 13.sp,
+                color = theme.accentColor
+            )
+        }
     }
 }
