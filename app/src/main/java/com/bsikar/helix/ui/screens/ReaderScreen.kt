@@ -34,14 +34,15 @@ import com.bsikar.helix.theme.ThemeMode
 fun ReaderScreen(
     book: Book,
     theme: AppTheme,
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    preferencesManager: UserPreferencesManager
 ) {
     var currentPage by remember { mutableIntStateOf(1) }
     val totalPages = 150 // Sample total pages
     var showSettings by remember { mutableStateOf(false) }
     
     // Use persistent reader settings from UserPreferencesManager
-    val userPreferences by UserPreferencesManager.preferences
+    val userPreferences by preferencesManager.preferences
     var readerSettings by remember { mutableStateOf(userPreferences.selectedReaderSettings) }
     
     // Update settings when preferences change
@@ -73,10 +74,11 @@ fun ReaderScreen(
             settings = readerSettings,
             onSettingsChange = { newSettings -> 
                 readerSettings = newSettings
-                UserPreferencesManager.updateReaderSettings(newSettings)
+                preferencesManager.updateReaderSettings(newSettings)
             },
             theme = theme,
-            onBackClick = { showSettings = false }
+            onBackClick = { showSettings = false },
+            preferencesManager = preferencesManager
         )
         return
     }
@@ -282,7 +284,8 @@ fun ReaderScreenPreview() {
         ReaderScreen(
             book = sampleBook,
             theme = theme,
-            onBackClick = { }
+            onBackClick = { },
+            preferencesManager = UserPreferencesManager(androidx.compose.ui.platform.LocalContext.current)
         )
     }
 }

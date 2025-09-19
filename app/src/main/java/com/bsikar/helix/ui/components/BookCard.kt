@@ -46,7 +46,7 @@ fun BookCard(
                         modifier = Modifier
                             .fillMaxWidth(book.progress)
                             .fillMaxHeight()
-                            .background(Color.White)
+                            .background(theme.accentColor)
                             .clip(RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp))
                     )
                 }

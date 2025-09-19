@@ -68,6 +68,9 @@ dependencies {
     // Kotlinx Serialization for reading progress persistence
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
     
+    // DataStore for persistent user preferences
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
+    
     // Extended Material Icons
     implementation("androidx.compose.material:material-icons-extended:1.6.8")
     

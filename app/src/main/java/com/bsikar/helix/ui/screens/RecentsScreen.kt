@@ -151,7 +151,7 @@ fun RecentsScreen(
                         )
                     },
                     colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = theme.accentColor.copy(alpha = 0.1f)
+                        indicatorColor = Color.Transparent
                     )
                 )
                 NavigationBarItem(
@@ -171,7 +171,7 @@ fun RecentsScreen(
                         )
                     },
                     colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = theme.accentColor.copy(alpha = 0.1f)
+                        indicatorColor = Color.Transparent
                     )
                 )
                 NavigationBarItem(
@@ -191,7 +191,7 @@ fun RecentsScreen(
                         )
                     },
                     colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = theme.accentColor.copy(alpha = 0.1f)
+                        indicatorColor = Color.Transparent
                     )
                 )
             }

@@ -35,13 +35,14 @@ fun ReaderSettingsScreen(
     settings: ReaderSettings,
     onSettingsChange: (ReaderSettings) -> Unit,
     theme: AppTheme,
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    preferencesManager: UserPreferencesManager
 ) {
     // Preset management state using UserPreferencesManager
-    val savedPresets = UserPreferencesManager.loadCustomPresets()
+    val savedPresets = preferencesManager.loadCustomPresets()
     var showOverrideDialog by remember { mutableStateOf(false) }
     var presetToOverride by remember { mutableIntStateOf(-1) }
-    val currentPresetInfo = UserPreferencesManager.getCurrentPresetInfo()
+    val currentPresetInfo = preferencesManager.getCurrentPresetInfo()
     Scaffold(
         containerColor = theme.backgroundColor,
         topBar = {
@@ -88,7 +89,7 @@ fun ReaderSettingsScreen(
                         savedPresets = savedPresets,
                         currentPresetInfo = currentPresetInfo,
                         onLoadPreset = { preset, presetType ->
-                            UserPreferencesManager.updateReaderSettings(
+                            preferencesManager.updateReaderSettings(
                                 preset.settings, 
                                 preset.name, 
                                 presetType
@@ -104,8 +105,8 @@ fun ReaderSettingsScreen(
                                     name = "Custom ${slot + 1}",
                                     settings = settings
                                 )
-                                UserPreferencesManager.saveCustomPreset(slot, newPreset)
-                                UserPreferencesManager.updateReaderSettings(
+                                preferencesManager.saveCustomPreset(slot, newPreset)
+                                preferencesManager.updateReaderSettings(
                                     settings,
                                     newPreset.name,
                                     PresetType.CUSTOM
@@ -113,7 +114,7 @@ fun ReaderSettingsScreen(
                             }
                         },
                         onResetToDefaults = { 
-                            UserPreferencesManager.resetToDefaults()
+                            preferencesManager.resetToDefaults()
                             onSettingsChange(ReaderPreset.getDefaultSettings())
                         },
                         theme = theme
@@ -226,8 +227,8 @@ fun ReaderSettingsScreen(
                                 name = "Custom ${presetToOverride + 1}",
                                 settings = settings
                             )
-                            UserPreferencesManager.saveCustomPreset(presetToOverride, newPreset)
-                            UserPreferencesManager.updateReaderSettings(
+                            preferencesManager.saveCustomPreset(presetToOverride, newPreset)
+                            preferencesManager.updateReaderSettings(
                                 settings,
                                 newPreset.name,
                                 PresetType.CUSTOM
@@ -756,7 +757,8 @@ fun ReaderSettingsScreenPreview() {
             settings = settings,
             onSettingsChange = { settings = it },
             theme = theme,
-            onBackClick = { }
+            onBackClick = { },
+            preferencesManager = UserPreferencesManager(androidx.compose.ui.platform.LocalContext.current)
         )
     }
 }

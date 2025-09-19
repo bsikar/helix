@@ -22,6 +22,7 @@ import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.theme.ThemeManager
 import com.bsikar.helix.theme.ThemeMode
 import com.bsikar.helix.ui.components.BookCard
+import com.bsikar.helix.ui.components.InfiniteHorizontalBookScroll
 import com.bsikar.helix.ui.components.SearchBar
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -37,14 +38,30 @@ fun LibraryScreen(
 ) {
     // Step 2: Manage search state here
     var searchQuery by remember { mutableStateOf("") }
+    
+    // Sort states
+    var readingSortAscending by remember { mutableStateOf(false) }
+    var planToReadSortAscending by remember { mutableStateOf(true) }
+    var readSortAscending by remember { mutableStateOf(true) }
 
-    // Step 3: Create filtered lists
-    val readingBooks = remember {
+    // Step 3: Create filtered lists with sort applied (from recents - most recent to least)
+    val allRecentBooks = remember {
         listOf(
+            Book("Kaguya-sama", "Aka Akasaka", Color(0xFFFF69B4), 0.6f), // Most recent
             Book("Clockwork Planet", "Yuu Kamiya", Color(0xFFFFD700), 0.8f),
             Book("Akame ga Kill!", "Takahiro", Color(0xFF8B0000), 0.3f),
-            Book("Kaguya-sama", "Aka Akasaka", Color(0xFFFF69B4), 0.6f)
+            Book("Dr. Stone", "Riichiro Inagaki", Color(0xFF00CED1), 0.4f),
+            Book("Fire Force", "Atsushi Ohkubo", Color(0xFFDC143C), 0.7f),
+            Book("Black Clover", "Yuki Tabata", Color(0xFF2F4F4F), 0.2f) // Least recent
         )
+    }
+    
+    // Calculate how many books fit on screen for Reading section
+    val booksVisibleOnScreen = 4 // Conservative estimate for most screens
+    
+    // Take only the books that fit on screen (most recent first)
+    val readingBooks = remember(allRecentBooks) {
+        allRecentBooks.take(booksVisibleOnScreen)
     }
     val planToReadBooks = remember {
         listOf(
@@ -56,9 +73,22 @@ fun LibraryScreen(
             Book("Vinland Saga", "Makoto Yukimura", Color(0xFFC0C0C0))
         )
     }
+    val readBooks = remember {
+        listOf(
+            Book("Attack on Titan", "Hajime Isayama", Color(0xFF8B4513), 1.0f),
+            Book("Death Note", "Tsugumi Ohba", Color(0xFF000000), 1.0f),
+            Book("Fullmetal Alchemist", "Hiromu Arakawa", Color(0xFFFFD700), 1.0f),
+            Book("Hunter x Hunter", "Yoshihiro Togashi", Color(0xFF228B22), 1.0f),
+            Book("Tokyo Ghoul", "Sui Ishida", Color(0xFF8B0000), 1.0f),
+            Book("Mob Psycho 100", "ONE", Color(0xFF9932CC), 1.0f),
+            Book("Demon Slayer", "Koyoharu Gotouge", Color(0xFF2E8B57), 1.0f),
+            Book("My Hero Academia", "Kohei Horikoshi", Color(0xFF32CD32), 1.0f),
+            Book("Bleach", "Tite Kubo", Color(0xFF4B0082), 1.0f)
+        )
+    }
 
-    val filteredReadingBooks = remember(searchQuery, readingBooks) {
-        if (searchQuery.isBlank()) {
+    val filteredReadingBooks = remember(searchQuery, readingBooks, readingSortAscending) {
+        val filtered = if (searchQuery.isBlank()) {
             readingBooks
         } else {
             readingBooks.filter { book ->
@@ -66,10 +96,16 @@ fun LibraryScreen(
                         book.author.contains(searchQuery, ignoreCase = true)
             }
         }
+        // Sort by recency (books are already ordered by most recent first in allRecentBooks)
+        if (readingSortAscending) {
+            filtered.reversed() // Least recent first
+        } else {
+            filtered // Most recent first (default order)
+        }
     }
 
-    val filteredPlanToReadBooks = remember(searchQuery, planToReadBooks) {
-        if (searchQuery.isBlank()) {
+    val filteredPlanToReadBooks = remember(searchQuery, planToReadBooks, planToReadSortAscending) {
+        val filtered = if (searchQuery.isBlank()) {
             planToReadBooks
         } else {
             planToReadBooks.filter { book ->
@@ -77,7 +113,31 @@ fun LibraryScreen(
                         book.author.contains(searchQuery, ignoreCase = true)
             }
         }
+        // Sort by title
+        if (planToReadSortAscending) {
+            filtered.sortedBy { it.title }
+        } else {
+            filtered.sortedByDescending { it.title }
+        }
     }
+
+    val filteredReadBooks = remember(searchQuery, readBooks, readSortAscending) {
+        val filtered = if (searchQuery.isBlank()) {
+            readBooks
+        } else {
+            readBooks.filter { book ->
+                book.title.contains(searchQuery, ignoreCase = true) ||
+                        book.author.contains(searchQuery, ignoreCase = true)
+            }
+        }
+        // Sort by title
+        if (readSortAscending) {
+            filtered.sortedBy { it.title }
+        } else {
+            filtered.sortedByDescending { it.title }
+        }
+    }
+
 
     Scaffold(
         containerColor = theme.backgroundColor,
@@ -129,7 +189,7 @@ fun LibraryScreen(
                         )
                     },
                     colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = theme.accentColor.copy(alpha = 0.1f)
+                        indicatorColor = Color.Transparent
                     )
                 )
                 NavigationBarItem(
@@ -149,7 +209,7 @@ fun LibraryScreen(
                         )
                     },
                     colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = theme.accentColor.copy(alpha = 0.1f)
+                        indicatorColor = Color.Transparent
                     )
                 )
                 NavigationBarItem(
@@ -169,13 +229,12 @@ fun LibraryScreen(
                         )
                     },
                     colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = theme.accentColor.copy(alpha = 0.1f)
+                        indicatorColor = Color.Transparent
                     )
                 )
             }
         }
     ) { innerPadding ->
-
         // This is now the single source of truth for vertical scrolling.
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -195,7 +254,13 @@ fun LibraryScreen(
             // Show "Reading" section only if results exist
             if (filteredReadingBooks.isNotEmpty()) {
                 item {
-                    SectionHeader(title = "Reading", subtitle = "Last read", theme = theme)
+                    SectionHeader(
+                        title = "Reading", 
+                        subtitle = "Last read", 
+                        theme = theme,
+                        isAscending = readingSortAscending,
+                        onSortClick = { readingSortAscending = !readingSortAscending }
+                    )
                 }
                 item {
                     LazyRow(
@@ -204,8 +269,8 @@ fun LibraryScreen(
                     ) {
                         items(filteredReadingBooks) { book ->
                             BookCard(
-                                book = book, 
-                                showProgress = true, 
+                                book = book,
+                                showProgress = true,
                                 theme = theme,
                                 onBookClick = onBookClick
                             )
@@ -217,7 +282,13 @@ fun LibraryScreen(
             // Show "Plan to read" section only if results exist
             if (filteredPlanToReadBooks.isNotEmpty()) {
                 item {
-                    SectionHeader(title = "Plan to read", subtitle = "Title", theme = theme)
+                    SectionHeader(
+                        title = "Plan to read", 
+                        subtitle = "Title", 
+                        theme = theme,
+                        isAscending = planToReadSortAscending,
+                        onSortClick = { planToReadSortAscending = !planToReadSortAscending }
+                    )
                 }
                 items(filteredPlanToReadBooks.chunked(3)) { rowItems ->
                     Row(
@@ -246,8 +317,46 @@ fun LibraryScreen(
                 }
             }
             
+            // Show "Read" section only if results exist
+            if (filteredReadBooks.isNotEmpty()) {
+                item {
+                    SectionHeader(
+                        title = "Read", 
+                        subtitle = "Title", 
+                        theme = theme,
+                        isAscending = readSortAscending,
+                        onSortClick = { readSortAscending = !readSortAscending }
+                    )
+                }
+                items(filteredReadBooks.chunked(3)) { rowItems ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        for (book in rowItems) {
+                            Box(modifier = Modifier.weight(1f)) {
+                                BookCard(
+                                    book = book, 
+                                    showProgress = false, 
+                                    theme = theme,
+                                    onBookClick = onBookClick
+                                )
+                            }
+                        }
+                        // This handles cases where the last row isn't full
+                        if (rowItems.size < 3) {
+                            for (i in 0 until (3 - rowItems.size)) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+            }
+            
             // Optional: Show a message if no results are found at all
-            if (filteredReadingBooks.isEmpty() && filteredPlanToReadBooks.isEmpty()) {
+            if (filteredReadingBooks.isEmpty() && filteredPlanToReadBooks.isEmpty() && filteredReadBooks.isEmpty()) {
                 item {
                     Text(
                         text = "No books found.",
@@ -265,7 +374,13 @@ fun LibraryScreen(
 
 // A new, simple composable for the section headers to reduce repetition.
 @Composable
-fun SectionHeader(title: String, subtitle: String, theme: AppTheme) {
+fun SectionHeader(
+    title: String, 
+    subtitle: String, 
+    theme: AppTheme,
+    isAscending: Boolean = true,
+    onSortClick: () -> Unit = {}
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -274,7 +389,7 @@ fun SectionHeader(title: String, subtitle: String, theme: AppTheme) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = "• $title",
+            text = title,
             fontSize = 18.sp,
             fontWeight = FontWeight.SemiBold,
             color = theme.primaryTextColor
@@ -285,12 +400,17 @@ fun SectionHeader(title: String, subtitle: String, theme: AppTheme) {
                 fontSize = 13.sp,
                 color = theme.secondaryTextColor
             )
-            Icon(
-                Icons.Filled.KeyboardArrowUp,
-                contentDescription = "Sort",
-                modifier = Modifier.size(16.dp),
-                tint = theme.secondaryTextColor
-            )
+            IconButton(
+                onClick = onSortClick,
+                modifier = Modifier.size(24.dp)
+            ) {
+                Icon(
+                    if (isAscending) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                    contentDescription = "Sort ${if (isAscending) "ascending" else "descending"}",
+                    modifier = Modifier.size(16.dp),
+                    tint = theme.secondaryTextColor
+                )
+            }
             IconButton(onClick = { }) {
                 Icon(
                     Icons.Filled.Refresh,

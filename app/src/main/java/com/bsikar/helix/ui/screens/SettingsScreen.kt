@@ -34,14 +34,12 @@ fun SettingsScreen(
                     containerColor = theme.surfaceColor,
                     titleContentColor = theme.primaryTextColor,
                 ),
-                title = { },
-                actions = {
+                title = {
                     Text(
                         "Settings",
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Medium,
-                        color = theme.primaryTextColor,
-                        modifier = Modifier.padding(end = 16.dp)
+                        color = theme.primaryTextColor
                     )
                 },
                 navigationIcon = {

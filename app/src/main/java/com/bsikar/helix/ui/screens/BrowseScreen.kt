@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -24,6 +25,7 @@ import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.theme.ThemeManager
 import com.bsikar.helix.theme.ThemeMode
 import com.bsikar.helix.ui.components.BookCard
+import com.bsikar.helix.ui.components.InfiniteHorizontalBookScroll
 import com.bsikar.helix.ui.components.SearchBar
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -33,7 +35,8 @@ fun BrowseScreen(
     onTabSelected: (Int) -> Unit = {},
     theme: AppTheme,
     onNavigateToSettings: () -> Unit = {},
-    onBookClick: (Book) -> Unit = {}
+    onBookClick: (Book) -> Unit = {},
+    onSeeAllClick: (String, List<Book>) -> Unit = { _, _ -> }
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var selectedGenre by remember { mutableStateOf("All") }
@@ -57,7 +60,15 @@ fun BrowseScreen(
             Book("Tokyo Ghoul", "Sui Ishida", Color(0xFF8B0000)),
             Book("Fullmetal Alchemist", "Hiromu Arakawa", Color(0xFFFFD700)),
             Book("Hunter x Hunter", "Yoshihiro Togashi", Color(0xFF228B22)),
-            Book("Bleach", "Tite Kubo", Color(0xFF4B0082))
+            Book("Bleach", "Tite Kubo", Color(0xFF4B0082)),
+            Book("Mob Psycho 100", "ONE", Color(0xFF9932CC)),
+            Book("Dr. Stone", "Riichiro Inagaki", Color(0xFF00CED1)),
+            Book("JoJo's Bizarre Adventure", "Hirohiko Araki", Color(0xFFFF6347)),
+            Book("Black Clover", "Yuki Tabata", Color(0xFF2F4F4F)),
+            Book("Fire Force", "Atsushi Ohkubo", Color(0xFFDC143C)),
+            Book("The Promised Neverland", "Kaiu Shirai", Color(0xFF8FBC8F)),
+            Book("Haikyuu!!", "Haruichi Furudate", Color(0xFFFF7F50)),
+            Book("One Piece", "Eiichiro Oda", Color(0xFF4169E1))
         )
     }
     
@@ -132,7 +143,7 @@ fun BrowseScreen(
                         )
                     },
                     colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = theme.accentColor.copy(alpha = 0.1f)
+                        indicatorColor = Color.Transparent
                     )
                 )
                 NavigationBarItem(
@@ -152,7 +163,7 @@ fun BrowseScreen(
                         )
                     },
                     colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = theme.accentColor.copy(alpha = 0.1f)
+                        indicatorColor = Color.Transparent
                     )
                 )
                 NavigationBarItem(
@@ -172,7 +183,7 @@ fun BrowseScreen(
                         )
                     },
                     colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = theme.accentColor.copy(alpha = 0.1f)
+                        indicatorColor = Color.Transparent
                     )
                 )
             }
@@ -205,75 +216,54 @@ fun BrowseScreen(
             // Featured Section
             if (filteredFeatured.isNotEmpty()) {
                 item {
-                    BrowseSectionHeader(title = "Featured", theme = theme)
+                    BrowseSectionHeader(
+                        title = "Featured", 
+                        theme = theme,
+                        onSeeAllClick = { onSeeAllClick("Featured", filteredFeatured) }
+                    )
                 }
                 item {
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        contentPadding = PaddingValues(horizontal = 16.dp)
-                    ) {
-                        items(filteredFeatured) { book ->
-                            BookCard(
-                                book = book, 
-                                showProgress = false, 
-                                theme = theme,
-                                onBookClick = onBookClick
-                            )
-                        }
-                    }
+                    InfiniteHorizontalScroll(
+                        books = filteredFeatured,
+                        theme = theme,
+                        onBookClick = onBookClick
+                    )
                 }
             }
 
             // Popular Section
             if (filteredPopular.isNotEmpty()) {
                 item {
-                    BrowseSectionHeader(title = "Popular", theme = theme)
+                    BrowseSectionHeader(
+                        title = "Popular", 
+                        theme = theme,
+                        onSeeAllClick = { onSeeAllClick("Popular", filteredPopular) }
+                    )
                 }
                 item {
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        contentPadding = PaddingValues(horizontal = 16.dp)
-                    ) {
-                        items(filteredPopular) { book ->
-                            BookCard(
-                                book = book, 
-                                showProgress = false, 
-                                theme = theme,
-                                onBookClick = onBookClick
-                            )
-                        }
-                    }
+                    InfiniteHorizontalScroll(
+                        books = filteredPopular,
+                        theme = theme,
+                        onBookClick = onBookClick
+                    )
                 }
             }
 
             // New Releases Section
             if (filteredNewReleases.isNotEmpty()) {
                 item {
-                    BrowseSectionHeader(title = "New Releases", theme = theme)
+                    BrowseSectionHeader(
+                        title = "New Releases", 
+                        theme = theme,
+                        onSeeAllClick = { onSeeAllClick("New Releases", filteredNewReleases) }
+                    )
                 }
-                items(filteredNewReleases.chunked(3)) { rowItems ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        for (book in rowItems) {
-                            Box(modifier = Modifier.weight(1f)) {
-                                BookCard(
-                                    book = book, 
-                                    showProgress = false, 
-                                    theme = theme,
-                                    onBookClick = onBookClick
-                                )
-                            }
-                        }
-                        if (rowItems.size < 3) {
-                            for (i in 0 until (3 - rowItems.size)) {
-                                Spacer(modifier = Modifier.weight(1f))
-                            }
-                        }
-                    }
+                item {
+                    InfiniteHorizontalScroll(
+                        books = filteredNewReleases,
+                        theme = theme,
+                        onBookClick = onBookClick
+                    )
                 }
             }
 
@@ -339,7 +329,11 @@ fun GenreFilterRow(
 }
 
 @Composable
-fun BrowseSectionHeader(title: String, theme: AppTheme) {
+fun BrowseSectionHeader(
+    title: String, 
+    theme: AppTheme,
+    onSeeAllClick: () -> Unit = {}
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -348,13 +342,13 @@ fun BrowseSectionHeader(title: String, theme: AppTheme) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = "• $title",
+            text = title,
             fontSize = 18.sp,
             fontWeight = FontWeight.SemiBold,
             color = theme.primaryTextColor
         )
         TextButton(
-            onClick = { }
+            onClick = onSeeAllClick
         ) {
             Text(
                 text = "See All",
@@ -363,6 +357,22 @@ fun BrowseSectionHeader(title: String, theme: AppTheme) {
             )
         }
     }
+}
+
+@Composable
+fun InfiniteHorizontalScroll(
+    books: List<Book>,
+    theme: AppTheme,
+    onBookClick: (Book) -> Unit
+) {
+    // Use the new circular implementation from BookSection
+    InfiniteHorizontalBookScroll(
+        books = books,
+        showProgress = false,
+        theme = theme,
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        onBookClick = onBookClick
+    )
 }
 
 // Helper function to filter books

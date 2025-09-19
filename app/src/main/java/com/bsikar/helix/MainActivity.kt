@@ -19,12 +19,13 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         setContent {
-            // Use persistent theme from UserPreferencesManager
-            val userPreferences by UserPreferencesManager.preferences
+            // Initialize UserPreferencesManager with context
+            val preferencesManager = remember { UserPreferencesManager(this@MainActivity) }
+            val userPreferences by preferencesManager.preferences
             val theme = ThemeManager.getTheme(userPreferences.themeMode)
 
             val systemUiController = rememberSystemUiController()
-            LaunchedEffect(theme) {
+            LaunchedEffect(userPreferences.themeMode) {
                 val isLight = theme == ThemeManager.lightTheme
                 systemUiController.setSystemBarsColor(
                     color = theme.backgroundColor,
@@ -37,8 +38,9 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 MainApp(
                     currentTheme = userPreferences.themeMode,
-                    onThemeChange = { newTheme -> UserPreferencesManager.updateTheme(newTheme) },
-                    theme = theme
+                    onThemeChange = { newTheme -> preferencesManager.updateTheme(newTheme) },
+                    theme = theme,
+                    preferencesManager = preferencesManager
                 )
             }
         }

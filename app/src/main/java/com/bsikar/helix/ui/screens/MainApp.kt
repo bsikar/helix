@@ -10,11 +10,13 @@ import com.bsikar.helix.theme.ThemeMode
 fun MainApp(
     currentTheme: ThemeMode,
     onThemeChange: (ThemeMode) -> Unit,
-    theme: AppTheme
+    theme: AppTheme,
+    preferencesManager: UserPreferencesManager
 ) {
     var selectedTab by remember { mutableStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
     var currentBook by remember { mutableStateOf<Book?>(null) }
+    var seeAllData by remember { mutableStateOf<Pair<String, List<Book>>?>(null) }
 
     when {
         showSettings -> {
@@ -25,11 +27,21 @@ fun MainApp(
                 onBackClick = { showSettings = false }
             )
         }
+        seeAllData != null -> {
+            SeeAllScreen(
+                title = seeAllData!!.first,
+                books = seeAllData!!.second,
+                theme = theme,
+                onBackClick = { seeAllData = null },
+                onBookClick = { book -> currentBook = book }
+            )
+        }
         currentBook != null -> {
             ReaderScreen(
                 book = currentBook!!,
                 theme = theme,
-                onBackClick = { currentBook = null }
+                onBackClick = { currentBook = null },
+                preferencesManager = preferencesManager
             )
         }
         else -> {
@@ -55,7 +67,8 @@ fun MainApp(
                 onTabSelected = { selectedTab = it },
                 theme = theme,
                 onNavigateToSettings = { showSettings = true },
-                onBookClick = { book -> currentBook = book }
+                onBookClick = { book -> currentBook = book },
+                onSeeAllClick = { title, books -> seeAllData = title to books }
             )
             else -> LibraryScreen(
                 selectedTab = selectedTab,
