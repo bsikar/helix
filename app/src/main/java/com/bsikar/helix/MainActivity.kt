@@ -3,55 +3,44 @@ package com.bsikar.helix
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.compose.runtime.getValue
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
-import com.bsikar.helix.data.rememberUserPreferences
-import com.bsikar.helix.ui.theme.HelixTheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.*
+import androidx.core.view.WindowCompat
+import com.bsikar.helix.data.UserPreferencesManager
+import com.bsikar.helix.theme.ThemeManager
+import com.bsikar.helix.theme.ThemeMode
+import com.bsikar.helix.ui.screens.MainApp
+import com.google.accompanist.systemuicontroller.rememberSystemUiController
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
 
-        // Initialize cache systems
-        initializeCaches()
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
         setContent {
-            val userPreferences = rememberUserPreferences()
+            // Use persistent theme from UserPreferencesManager
+            val userPreferences by UserPreferencesManager.preferences
+            val theme = ThemeManager.getTheme(userPreferences.themeMode)
 
-            HelixTheme {
-                val navController = rememberNavController()
-                NavHost(navController = navController, startDestination = "library") {
-                    composable("library") {
-                        LibraryScreen(navController = navController)
-                    }
-                    composable("reader/{bookPath}") { backStackEntry ->
-                        val bookPath = backStackEntry.arguments?.getString("bookPath")
-                        if (bookPath != null) {
-                            ReaderScreen(
-                                bookPath = bookPath,
-                                navController = navController,
-                                userPreferences = userPreferences
-                            )
-                        }
-                    }
-                    composable("settings") {
-                        SettingsScreen(
-                            navController = navController
-                        )
-                    }
-                }
+            val systemUiController = rememberSystemUiController()
+            LaunchedEffect(theme) {
+                val isLight = theme == ThemeManager.lightTheme
+                systemUiController.setSystemBarsColor(
+                    color = theme.backgroundColor,
+                    darkIcons = isLight,
+                    isNavigationBarContrastEnforced = false
+                )
+                systemUiController.navigationBarDarkContentEnabled = isLight
+            }
+
+            MaterialTheme {
+                MainApp(
+                    currentTheme = userPreferences.themeMode,
+                    onThemeChange = { newTheme -> UserPreferencesManager.updateTheme(newTheme) },
+                    theme = theme
+                )
             }
         }
-    }
-
-    private fun initializeCaches() {
-        // Initialize image cache with application context
-        ImageCache.initialize(this)
-
-        // Initialize persistent disk cache
-        PersistentImageCache.initialize(this)
     }
 }

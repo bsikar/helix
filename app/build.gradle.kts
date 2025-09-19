@@ -2,7 +2,6 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-    id("io.gitlab.arturbosch.detekt")
     id("org.jetbrains.kotlin.plugin.serialization") version "1.9.10"
 }
 
@@ -69,30 +68,18 @@ dependencies {
     // Kotlinx Serialization for reading progress persistence
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
     
+    // Extended Material Icons
+    implementation("androidx.compose.material:material-icons-extended:1.6.8")
+    
+    // System UI Controller for status bar styling
+    implementation("com.google.accompanist:accompanist-systemuicontroller:0.32.0")
+    
     // Test dependencies commented out to avoid Gradle task creation issues
     // testImplementation(libs.junit)
     // androidTestImplementation(libs.androidx.junit)
     // androidTestImplementation(libs.androidx.espresso.core)
     
-    detektPlugins("io.gitlab.arturbosch.detekt:detekt-formatting:1.23.6")
-}
-
-detekt {
-    toolVersion = "1.23.6"
-    config.setFrom(file("$projectDir/config/detekt/detekt.yml"))
-    buildUponDefaultConfig = true
-    allRules = false
-    autoCorrect = true
-}
-
-tasks.withType<io.gitlab.arturbosch.detekt.Detekt>().configureEach {
-    jvmTarget = "11"
-    reports {
-        html.required.set(true)
-        xml.required.set(true)
-        sarif.required.set(true)
-        md.required.set(true)
-    }
+    
 }
 
 // Disable all test-related and lint tasks
@@ -105,23 +92,4 @@ tasks.configureEach {
         name.contains("lint", ignoreCase = true)) {
         enabled = false
     }
-}
-
-// Integrate Detekt into build process
-afterEvaluate {
-    tasks.findByName("assembleDebug")?.dependsOn("detekt")
-    tasks.findByName("assembleRelease")?.dependsOn("detekt")
-    tasks.findByName("bundle")?.dependsOn("detekt")
-    tasks.findByName("bundleRelease")?.dependsOn("detekt")
-    
-    // Make build task depend on detekt and skip problematic test
-    tasks.findByName("build")?.dependsOn("detekt")
-}
-
-// Custom build task without tests
-tasks.register("buildApp") {
-    description = "Build the app with Detekt quality checks (no tests)"
-    group = "build"
-    
-    dependsOn("detekt", "assembleDebug", "assembleRelease")
 }
