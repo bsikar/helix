@@ -3,6 +3,7 @@ package com.bsikar.helix
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.core.view.WindowCompat
@@ -10,9 +11,13 @@ import com.bsikar.helix.data.UserPreferencesManager
 import com.bsikar.helix.theme.ThemeManager
 import com.bsikar.helix.theme.ThemeMode
 import com.bsikar.helix.ui.screens.MainApp
+import com.bsikar.helix.viewmodels.LibraryViewModel
 import com.google.accompanist.systemuicontroller.rememberSystemUiController
 
 class MainActivity : ComponentActivity() {
+    
+    private val libraryViewModel: LibraryViewModel by viewModels()
+    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -40,7 +45,8 @@ class MainActivity : ComponentActivity() {
                     currentTheme = userPreferences.themeMode,
                     onThemeChange = { newTheme -> preferencesManager.updateTheme(newTheme) },
                     theme = theme,
-                    preferencesManager = preferencesManager
+                    preferencesManager = preferencesManager,
+                    libraryViewModel = libraryViewModel
                 )
             }
         }

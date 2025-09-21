@@ -42,7 +42,19 @@ fun ReaderSettingsScreen(
     val savedPresets = preferencesManager.loadCustomPresets()
     var showOverrideDialog by remember { mutableStateOf(false) }
     var presetToOverride by remember { mutableIntStateOf(-1) }
-    val currentPresetInfo = preferencesManager.getCurrentPresetInfo()
+    
+    // Local state for immediate UI feedback
+    var currentActivePreset by remember { mutableStateOf(preferencesManager.getCurrentPresetInfo()) }
+    
+    // Update local state when preferencesManager state changes
+    LaunchedEffect(preferencesManager.getCurrentPresetInfo()) {
+        currentActivePreset = preferencesManager.getCurrentPresetInfo()
+    }
+    
+    // Helper function to clear active preset when manual changes are made
+    fun clearActivePresetOnManualChange() {
+        currentActivePreset = null to PresetType.DEFAULT
+    }
     Scaffold(
         containerColor = theme.backgroundColor,
         topBar = {
@@ -81,53 +93,31 @@ fun ReaderSettingsScreen(
             contentPadding = PaddingValues(20.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // Preset Management Section
+            // Quick Presets Section (Default presets only)
             item {
-                ReaderSettingsSection(title = "Presets", theme = theme) {
-                    PresetManagement(
+                ReaderSettingsSection(title = "Quick Presets", theme = theme) {
+                    QuickPresetManagement(
                         currentSettings = settings,
-                        savedPresets = savedPresets,
-                        currentPresetInfo = currentPresetInfo,
+                        currentPresetInfo = currentActivePreset,
                         onLoadPreset = { preset, presetType ->
+                            // Update UI state immediately
+                            currentActivePreset = preset.name to presetType
+                            // Update settings
+                            onSettingsChange(preset.settings)
+                            // Save to preferences
                             preferencesManager.updateReaderSettings(
                                 preset.settings, 
                                 preset.name, 
                                 presetType
                             )
-                            onSettingsChange(preset.settings)
-                        },
-                        onSavePreset = { slot ->
-                            if (savedPresets[slot] != null) {
-                                presetToOverride = slot
-                                showOverrideDialog = true
-                            } else {
-                                val newPreset = ReaderPreset(
-                                    name = "Custom ${slot + 1}",
-                                    settings = settings
-                                )
-                                preferencesManager.saveCustomPreset(slot, newPreset)
-                                preferencesManager.updateReaderSettings(
-                                    settings,
-                                    newPreset.name,
-                                    PresetType.CUSTOM
-                                )
-                            }
                         },
                         onResetToDefaults = { 
-                            preferencesManager.resetToDefaults()
+                            // Update UI state immediately
+                            currentActivePreset = null to PresetType.DEFAULT
+                            // Update settings
                             onSettingsChange(ReaderPreset.getDefaultSettings())
-                        },
-                        theme = theme
-                    )
-                }
-            }
-            // Font Size Section
-            item {
-                ReaderSettingsSection(title = "Font Size", theme = theme) {
-                    FontSizeSelector(
-                        currentSize = settings.fontSize,
-                        onSizeChange = { newSize ->
-                            onSettingsChange(settings.copy(fontSize = newSize))
+                            // Save to preferences
+                            preferencesManager.resetToDefaults()
                         },
                         theme = theme
                     )
@@ -140,7 +130,22 @@ fun ReaderSettingsScreen(
                     ReadingModeSelector(
                         currentMode = settings.readingMode,
                         onModeChange = { newMode ->
+                            clearActivePresetOnManualChange()
                             onSettingsChange(settings.copy(readingMode = newMode))
+                        },
+                        theme = theme
+                    )
+                }
+            }
+            
+            // Font Size Section
+            item {
+                ReaderSettingsSection(title = "Font Size", theme = theme) {
+                    FontSizeSelector(
+                        currentSize = settings.fontSize,
+                        onSizeChange = { newSize ->
+                            clearActivePresetOnManualChange()
+                            onSettingsChange(settings.copy(fontSize = newSize))
                         },
                         theme = theme
                     )
@@ -153,6 +158,7 @@ fun ReaderSettingsScreen(
                     TextAlignmentSelector(
                         currentAlignment = settings.textAlign,
                         onAlignmentChange = { newAlignment ->
+                            clearActivePresetOnManualChange()
                             onSettingsChange(settings.copy(textAlign = newAlignment))
                         },
                         theme = theme
@@ -166,6 +172,7 @@ fun ReaderSettingsScreen(
                     LineHeightSelector(
                         currentLineHeight = settings.lineHeight,
                         onLineHeightChange = { newLineHeight ->
+                            clearActivePresetOnManualChange()
                             onSettingsChange(settings.copy(lineHeight = newLineHeight))
                         },
                         theme = theme
@@ -179,6 +186,7 @@ fun ReaderSettingsScreen(
                     BrightnessSelector(
                         currentBrightness = settings.brightness,
                         onBrightnessChange = { newBrightness ->
+                            clearActivePresetOnManualChange()
                             onSettingsChange(settings.copy(brightness = newBrightness))
                         },
                         theme = theme
@@ -193,10 +201,55 @@ fun ReaderSettingsScreen(
                         currentHorizontalMargin = settings.marginHorizontal,
                         currentVerticalMargin = settings.marginVertical,
                         onMarginsChange = { horizontal, vertical ->
+                            clearActivePresetOnManualChange()
                             onSettingsChange(settings.copy(
                                 marginHorizontal = horizontal,
                                 marginVertical = vertical
                             ))
+                        },
+                        theme = theme
+                    )
+                }
+            }
+
+            // Custom Presets Section (moved to bottom)
+            item {
+                ReaderSettingsSection(title = "Custom Presets", theme = theme) {
+                    CustomPresetManagement(
+                        currentSettings = settings,
+                        savedPresets = savedPresets,
+                        currentPresetInfo = currentActivePreset,
+                        onLoadPreset = { preset, presetType ->
+                            // Update UI state immediately
+                            currentActivePreset = preset.name to presetType
+                            // Update settings
+                            onSettingsChange(preset.settings)
+                            // Save to preferences
+                            preferencesManager.updateReaderSettings(
+                                preset.settings, 
+                                preset.name, 
+                                presetType
+                            )
+                        },
+                        onSavePreset = { slot ->
+                            if (savedPresets[slot] != null) {
+                                presetToOverride = slot
+                                showOverrideDialog = true
+                            } else {
+                                val newPreset = ReaderPreset(
+                                    name = "Custom ${slot + 1}",
+                                    settings = settings
+                                )
+                                // Update UI state immediately
+                                currentActivePreset = newPreset.name to PresetType.CUSTOM
+                                // Save to preferences
+                                preferencesManager.saveCustomPreset(slot, newPreset)
+                                preferencesManager.updateReaderSettings(
+                                    settings,
+                                    newPreset.name,
+                                    PresetType.CUSTOM
+                                )
+                            }
                         },
                         theme = theme
                     )
@@ -227,6 +280,9 @@ fun ReaderSettingsScreen(
                                 name = "Custom ${presetToOverride + 1}",
                                 settings = settings
                             )
+                            // Update UI state immediately
+                            currentActivePreset = newPreset.name to PresetType.CUSTOM
+                            // Save to preferences
                             preferencesManager.saveCustomPreset(presetToOverride, newPreset)
                             preferencesManager.updateReaderSettings(
                                 settings,
@@ -328,6 +384,107 @@ fun FontSizeSelector(
                 contentDescription = "Increase Font Size",
                 tint = if (currentSize < fontSizes.last()) theme.primaryTextColor else theme.secondaryTextColor
             )
+        }
+    }
+}
+
+@Composable
+fun QuickPresetManagement(
+    currentSettings: ReaderSettings,
+    currentPresetInfo: Pair<String?, PresetType>,
+    onLoadPreset: (ReaderPreset, PresetType) -> Unit,
+    onResetToDefaults: () -> Unit,
+    theme: AppTheme
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // Default presets
+        val defaultPresets = ReaderPreset.getDefaultPresets()
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            defaultPresets.forEach { preset ->
+                val isActive = currentPresetInfo.first == preset.name && 
+                              currentPresetInfo.second == PresetType.DEFAULT
+                OutlinedButton(
+                    onClick = { onLoadPreset(preset, PresetType.DEFAULT) },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = if (isActive) theme.surfaceColor else theme.primaryTextColor,
+                        containerColor = if (isActive) theme.accentColor else androidx.compose.ui.graphics.Color.Transparent
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp, 
+                        if (isActive) theme.accentColor else theme.secondaryTextColor.copy(alpha = 0.3f)
+                    )
+                ) {
+                    Text(
+                        text = preset.name,
+                        fontSize = 11.sp,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+        
+        HorizontalDivider(color = theme.secondaryTextColor.copy(alpha = 0.2f))
+        
+        // Reset to defaults
+        OutlinedButton(
+            onClick = onResetToDefaults,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = theme.secondaryTextColor
+            ),
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp, 
+                theme.secondaryTextColor.copy(alpha = 0.3f)
+            )
+        ) {
+            Icon(
+                Icons.Filled.Refresh,
+                contentDescription = "Reset",
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Reset to Defaults")
+        }
+    }
+}
+
+@Composable
+fun CustomPresetManagement(
+    currentSettings: ReaderSettings,
+    savedPresets: List<ReaderPreset?>,
+    currentPresetInfo: Pair<String?, PresetType>,
+    onLoadPreset: (ReaderPreset, PresetType) -> Unit,
+    onSavePreset: (Int) -> Unit,
+    theme: AppTheme
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // Custom preset slots
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            savedPresets.forEachIndexed { index, preset ->
+                val isActive = preset != null && 
+                              currentPresetInfo.first == preset.name && 
+                              currentPresetInfo.second == PresetType.CUSTOM
+                PresetSlot(
+                    slot = index + 1,
+                    preset = preset,
+                    isActive = isActive,
+                    onLoad = { onLoadPreset(it, PresetType.CUSTOM) },
+                    onSave = { onSavePreset(index) },
+                    theme = theme,
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
     }
 }

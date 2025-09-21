@@ -1,9 +1,12 @@
 package com.bsikar.helix.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -28,6 +31,7 @@ import com.bsikar.helix.data.UserPreferencesManager
 import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.theme.ThemeManager
 import com.bsikar.helix.theme.ThemeMode
+import com.bsikar.helix.ui.components.HighlightedText
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -35,11 +39,14 @@ fun ReaderScreen(
     book: Book,
     theme: AppTheme,
     onBackClick: () -> Unit,
+    onUpdateReadingPosition: (String, Int, Int, Int) -> Unit,
     preferencesManager: UserPreferencesManager
 ) {
-    var currentPage by remember { mutableIntStateOf(1) }
-    val totalPages = 150 // Sample total pages
+    var currentPage by remember { mutableIntStateOf(book.currentPage) }
+    val totalPages = book.totalPages
     var showSettings by remember { mutableStateOf(false) }
+    var showChapterDialog by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState(initial = book.scrollPosition)
     
     // Use persistent reader settings from UserPreferencesManager
     val userPreferences by preferencesManager.preferences
@@ -48,6 +55,32 @@ fun ReaderScreen(
     // Update settings when preferences change
     LaunchedEffect(userPreferences.selectedReaderSettings) {
         readerSettings = userPreferences.selectedReaderSettings
+    }
+    
+    // Save reading position when page changes
+    LaunchedEffect(currentPage) {
+        onUpdateReadingPosition(book.id, currentPage, book.currentChapter, scrollState.value)
+    }
+    
+    // Save scroll position periodically
+    LaunchedEffect(scrollState.value) {
+        onUpdateReadingPosition(book.id, currentPage, book.currentChapter, scrollState.value)
+    }
+    
+    // Sample chapters
+    val sampleChapters = remember {
+        listOf(
+            "Chapter 1: The Beginning",
+            "Chapter 2: The Journey Starts",
+            "Chapter 3: First Obstacles",
+            "Chapter 4: New Allies",
+            "Chapter 5: Dark Revelations",
+            "Chapter 6: The Hidden Truth",
+            "Chapter 7: Confrontation",
+            "Chapter 8: Battle of Wills",
+            "Chapter 9: Final Stand",
+            "Chapter 10: Resolution"
+        )
     }
     
     // Sample book content
@@ -142,9 +175,10 @@ fun ReaderScreen(
             ReaderBottomBar(
                 currentPage = currentPage,
                 totalPages = totalPages,
-                progress = book.progress,
+                progress = currentPage.toFloat() / totalPages,
                 onPreviousPage = { if (currentPage > 1) currentPage-- },
                 onNextPage = { if (currentPage < totalPages) currentPage++ },
+                onProgressTap = { showChapterDialog = true },
                 theme = theme
             )
         }
@@ -166,7 +200,7 @@ fun ReaderScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(scrollState)
                     .padding(
                         horizontal = readerSettings.marginHorizontal.dp,
                         vertical = readerSettings.marginVertical.dp
@@ -186,6 +220,22 @@ fun ReaderScreen(
             }
         }
     }
+    
+    // Chapter selection dialog
+    if (showChapterDialog) {
+        ChapterSelectionDialog(
+            chapters = sampleChapters,
+            currentChapter = book.currentChapter,
+            onChapterSelected = { chapterIndex ->
+                // Navigate to selected chapter
+                // For demo purposes, just change the page
+                currentPage = (chapterIndex + 1) * 15 // Simulate chapter starts
+                showChapterDialog = false
+            },
+            onDismiss = { showChapterDialog = false },
+            theme = theme
+        )
+    }
 }
 
 @Composable
@@ -195,6 +245,7 @@ fun ReaderBottomBar(
     progress: Float,
     onPreviousPage: () -> Unit,
     onNextPage: () -> Unit,
+    onProgressTap: () -> Unit = {},
     theme: AppTheme
 ) {
     Surface(
@@ -220,9 +271,12 @@ fun ReaderBottomBar(
                 )
             }
             
-            // Page info
+            // Page info (clickable)
             Column(
-                horizontalAlignment = Alignment.CenterHorizontally
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .clickable { onProgressTap() }
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
                 Text(
                     text = "$currentPage of $totalPages",
@@ -269,6 +323,202 @@ fun applyBrightness(color: Color, brightness: Float): Color {
     )
 }
 
+@Composable
+fun ChapterSelectionDialog(
+    chapters: List<String>,
+    currentChapter: Int,
+    onChapterSelected: (Int) -> Unit,
+    onDismiss: () -> Unit,
+    theme: AppTheme
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    
+    // Filter chapters based on search query
+    val filteredChapters = remember(chapters, searchQuery) {
+        if (searchQuery.isBlank()) {
+            chapters.mapIndexed { index, title -> index to title }
+        } else {
+            chapters.mapIndexed { index, title -> index to title }
+                .filter { (index, title) ->
+                    title.contains(searchQuery, ignoreCase = true) ||
+                    "${index + 1}".contains(searchQuery) // Search by chapter number too
+                }
+        }
+    }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text(
+                    text = "Select Chapter",
+                    color = theme.primaryTextColor,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // Search bar
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    label = {
+                        Text(
+                            text = "Search chapters...",
+                            color = theme.secondaryTextColor
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Filled.Search,
+                            contentDescription = "Search",
+                            tint = theme.secondaryTextColor
+                        )
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(
+                                    Icons.Filled.Clear,
+                                    contentDescription = "Clear search",
+                                    tint = theme.secondaryTextColor
+                                )
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = theme.accentColor,
+                        unfocusedBorderColor = theme.secondaryTextColor.copy(alpha = 0.3f),
+                        focusedLabelColor = theme.accentColor,
+                        unfocusedLabelColor = theme.secondaryTextColor,
+                        cursorColor = theme.accentColor,
+                        focusedTextColor = theme.primaryTextColor,
+                        unfocusedTextColor = theme.primaryTextColor
+                    ),
+                    singleLine = true
+                )
+            }
+        },
+        text = {
+            Column {
+                // Results count
+                if (searchQuery.isNotEmpty()) {
+                    Text(
+                        text = "${filteredChapters.size} chapter${if (filteredChapters.size != 1) "s" else ""} found",
+                        fontSize = 12.sp,
+                        color = theme.secondaryTextColor,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
+                
+                // Chapter list
+                LazyColumn(
+                    modifier = Modifier.height(350.dp)
+                ) {
+                    if (filteredChapters.isEmpty()) {
+                        item {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(
+                                    Icons.Filled.Search,
+                                    contentDescription = "No results",
+                                    tint = theme.secondaryTextColor.copy(alpha = 0.5f),
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = "No chapters found",
+                                    fontSize = 16.sp,
+                                    color = theme.secondaryTextColor,
+                                    textAlign = TextAlign.Center
+                                )
+                                Text(
+                                    text = "Try a different search term",
+                                    fontSize = 14.sp,
+                                    color = theme.secondaryTextColor.copy(alpha = 0.7f),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    } else {
+                        items(count = filteredChapters.size) { listIndex ->
+                            val (originalIndex, title) = filteredChapters[listIndex]
+                            val isCurrentChapter = (originalIndex + 1) == currentChapter
+                            
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onChapterSelected(originalIndex) }
+                                    .padding(vertical = 12.dp, horizontal = 8.dp)
+                                    .background(
+                                        color = if (isCurrentChapter) theme.accentColor.copy(alpha = 0.1f) else androidx.compose.ui.graphics.Color.Transparent,
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Chapter number
+                                Text(
+                                    text = "${originalIndex + 1}",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isCurrentChapter) theme.accentColor else theme.secondaryTextColor,
+                                    modifier = Modifier.width(32.dp)
+                                )
+                                
+                                Spacer(modifier = Modifier.width(12.dp))
+                                
+                                // Chapter title with search highlighting
+                                if (searchQuery.isNotEmpty() && searchQuery.isNotBlank()) {
+                                    HighlightedText(
+                                        text = title,
+                                        searchQuery = searchQuery,
+                                        normalColor = if (isCurrentChapter) theme.accentColor else theme.primaryTextColor,
+                                        highlightColor = theme.accentColor,
+                                        fontSize = 14.sp,
+                                        fontWeight = if (isCurrentChapter) FontWeight.Medium else FontWeight.Normal,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                } else {
+                                    Text(
+                                        text = title,
+                                        fontSize = 14.sp,
+                                        color = if (isCurrentChapter) theme.accentColor else theme.primaryTextColor,
+                                        fontWeight = if (isCurrentChapter) FontWeight.Medium else FontWeight.Normal,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                
+                                // Current indicator
+                                if (isCurrentChapter) {
+                                    Icon(
+                                        Icons.Filled.PlayArrow,
+                                        contentDescription = "Currently reading",
+                                        tint = theme.accentColor,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = theme.accentColor)
+            }
+        },
+        containerColor = theme.surfaceColor
+    )
+}
+
 @Preview(showBackground = true)
 @Composable
 fun ReaderScreenPreview() {
@@ -285,6 +535,7 @@ fun ReaderScreenPreview() {
             book = sampleBook,
             theme = theme,
             onBackClick = { },
+            onUpdateReadingPosition = { _, _, _, _ -> },
             preferencesManager = UserPreferencesManager(androidx.compose.ui.platform.LocalContext.current)
         )
     }

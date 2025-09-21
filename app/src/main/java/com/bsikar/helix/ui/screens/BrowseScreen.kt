@@ -21,6 +21,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bsikar.helix.data.Book
+import com.bsikar.helix.data.Tag
+import com.bsikar.helix.data.TagCategory
 import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.theme.ThemeManager
 import com.bsikar.helix.theme.ThemeMode
@@ -36,62 +38,75 @@ fun BrowseScreen(
     theme: AppTheme,
     onNavigateToSettings: () -> Unit = {},
     onBookClick: (Book) -> Unit = {},
-    onSeeAllClick: (String, List<Book>) -> Unit = { _, _ -> }
+    onSeeAllClick: (String, List<Book>) -> Unit = { _, _ -> },
+    allBooks: List<Book> = emptyList(),
+    onStartReading: (String) -> Unit = {},
+    onMarkCompleted: (String) -> Unit = {},
+    onMoveToPlanToRead: (String) -> Unit = {},
+    onSetProgress: (String, Float) -> Unit = { _, _ -> },
+    onEditTags: (String, List<String>) -> Unit = { _, _ -> }
 ) {
     var searchQuery by remember { mutableStateOf("") }
-    var selectedGenre by remember { mutableStateOf("All") }
-
-    // Sample browse data organized by categories
-    val genres = listOf("All", "Manga", "Light Novel", "Manhwa", "Manhua", "Classic")
+    var selectedTags by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var expandedCategory by remember { mutableStateOf<TagCategory?>(null) }
     
-    val featuredBooks = remember {
-        listOf(
-            Book("Attack on Titan", "Hajime Isayama", Color(0xFF8B4513)),
-            Book("Death Note", "Tsugumi Ohba", Color(0xFF000000)),
-            Book("One Piece", "Eiichiro Oda", Color(0xFF4169E1)),
-            Book("Naruto", "Masashi Kishimoto", Color(0xFFFF8C00))
-        )
+    // Organize books by categories based on tags
+    val featuredBooks = remember(allBooks) {
+        allBooks.filter { book -> 
+            book.hasAnyTag(listOf("shounen", "seinen")) || book.progress > 0.5f
+        }.take(6)
     }
     
-    val popularBooks = remember {
-        listOf(
-            Book("Demon Slayer", "Koyoharu Gotouge", Color(0xFF2E8B57)),
-            Book("My Hero Academia", "Kohei Horikoshi", Color(0xFF32CD32)),
-            Book("Tokyo Ghoul", "Sui Ishida", Color(0xFF8B0000)),
-            Book("Fullmetal Alchemist", "Hiromu Arakawa", Color(0xFFFFD700)),
-            Book("Hunter x Hunter", "Yoshihiro Togashi", Color(0xFF228B22)),
-            Book("Bleach", "Tite Kubo", Color(0xFF4B0082)),
-            Book("Mob Psycho 100", "ONE", Color(0xFF9932CC)),
-            Book("Dr. Stone", "Riichiro Inagaki", Color(0xFF00CED1)),
-            Book("JoJo's Bizarre Adventure", "Hirohiko Araki", Color(0xFFFF6347)),
-            Book("Black Clover", "Yuki Tabata", Color(0xFF2F4F4F)),
-            Book("Fire Force", "Atsushi Ohkubo", Color(0xFFDC143C)),
-            Book("The Promised Neverland", "Kaiu Shirai", Color(0xFF8FBC8F)),
-            Book("Haikyuu!!", "Haruichi Furudate", Color(0xFFFF7F50)),
-            Book("One Piece", "Eiichiro Oda", Color(0xFF4169E1))
-        )
+    val popularBooks = remember(allBooks) {
+        allBooks.filter { book -> 
+            book.hasAnyTag(listOf("action", "adventure", "fantasy", "supernatural"))
+        }.take(12)
     }
     
-    val newReleases = remember {
-        listOf(
-            Book("Spy x Family", "Tatsuya Endo", Color(0xFFFF1493)),
-            Book("Hell's Paradise", "Yuji Kaku", Color(0xFF8B008B)),
-            Book("Kaiju No. 8", "Naoya Matsumoto", Color(0xFF00CED1)),
-            Book("Blue Lock", "Muneyuki Kaneshiro", Color(0xFF0000FF))
-        )
+    val newReleases = remember(allBooks) {
+        allBooks.filter { book -> 
+            book.hasAnyTag(listOf("ongoing", "romance", "comedy"))
+        }.take(6)
     }
 
-    // Filter books based on search query and selected genre
-    val filteredFeatured = remember(searchQuery, selectedGenre, featuredBooks) {
-        filterBooks(featuredBooks, searchQuery, selectedGenre)
+    // Get all unique tags that exist in the library, organized by all categories
+    val availableTagsByCategory = remember(allBooks) {
+        val allTagsInLibrary = allBooks.flatMap { it.getTagObjects() }.distinctBy { it.id }
+        TagCategory.values().filter { it != TagCategory.CUSTOM }.associateWith { category ->
+            allTagsInLibrary.filter { it.category == category }
+        }.filterValues { it.isNotEmpty() }
+    }
+
+    // Calculate which tags are available given current filter selection
+    val availableTagsForCurrentFilters = remember(allBooks, selectedTags) {
+        if (selectedTags.isEmpty()) {
+            availableTagsByCategory
+        } else {
+            // Find books that match current filters
+            val filteredBooks = allBooks.filter { book ->
+                selectedTags.all { tag -> book.hasTag(tag) }
+            }
+            
+            // Get tags available in filtered books
+            val availableTagsInFilteredBooks = filteredBooks.flatMap { it.getTagObjects() }.distinctBy { it.id }
+            
+            TagCategory.values().filter { it != TagCategory.CUSTOM }.associateWith { category ->
+                availableTagsInFilteredBooks.filter { it.category == category }
+            }.filterValues { it.isNotEmpty() }
+        }
+    }
+
+    // Filter books based on search query and selected tags (multiple)
+    val filteredFeatured = remember(searchQuery, selectedTags, featuredBooks) {
+        filterBooksByTags(featuredBooks, searchQuery, selectedTags)
     }
     
-    val filteredPopular = remember(searchQuery, selectedGenre, popularBooks) {
-        filterBooks(popularBooks, searchQuery, selectedGenre)
+    val filteredPopular = remember(searchQuery, selectedTags, popularBooks) {
+        filterBooksByTags(popularBooks, searchQuery, selectedTags)
     }
     
-    val filteredNewReleases = remember(searchQuery, selectedGenre, newReleases) {
-        filterBooks(newReleases, searchQuery, selectedGenre)
+    val filteredNewReleases = remember(searchQuery, selectedTags, newReleases) {
+        filterBooksByTags(newReleases, searchQuery, selectedTags)
     }
 
     Scaffold(
@@ -203,14 +218,28 @@ fun BrowseScreen(
                 )
             }
 
-            // Genre Filter
-            item {
-                GenreFilterRow(
-                    genres = genres,
-                    selectedGenre = selectedGenre,
-                    onGenreSelected = { selectedGenre = it },
-                    theme = theme
-                )
+            // Collapsible Tag Filters (All Categories) with Clear Filters
+            if (availableTagsByCategory.isNotEmpty()) {
+                item {
+                    CollapsibleAllCategoriesFilter(
+                        availableTagsByCategory = availableTagsByCategory,
+                        availableTagsForCurrentFilters = availableTagsForCurrentFilters,
+                        selectedTags = selectedTags,
+                        expandedCategory = expandedCategory,
+                        onTagToggled = { tagId ->
+                            selectedTags = if (selectedTags.contains(tagId)) {
+                                selectedTags - tagId
+                            } else {
+                                selectedTags + tagId
+                            }
+                        },
+                        onClearFilters = { selectedTags = emptySet() },
+                        onCategoryToggled = { category ->
+                            expandedCategory = if (expandedCategory == category) null else category
+                        },
+                        theme = theme
+                    )
+                }
             }
 
             // Featured Section
@@ -226,7 +255,13 @@ fun BrowseScreen(
                     InfiniteHorizontalScroll(
                         books = filteredFeatured,
                         theme = theme,
-                        onBookClick = onBookClick
+                        searchQuery = searchQuery,
+                        onBookClick = onBookClick,
+                        onStartReading = onStartReading,
+                        onMarkCompleted = onMarkCompleted,
+                        onMoveToPlanToRead = onMoveToPlanToRead,
+                        onSetProgress = onSetProgress,
+                        onEditTags = onEditTags
                     )
                 }
             }
@@ -244,7 +279,13 @@ fun BrowseScreen(
                     InfiniteHorizontalScroll(
                         books = filteredPopular,
                         theme = theme,
-                        onBookClick = onBookClick
+                        searchQuery = searchQuery,
+                        onBookClick = onBookClick,
+                        onStartReading = onStartReading,
+                        onMarkCompleted = onMarkCompleted,
+                        onMoveToPlanToRead = onMoveToPlanToRead,
+                        onSetProgress = onSetProgress,
+                        onEditTags = onEditTags
                     )
                 }
             }
@@ -262,7 +303,13 @@ fun BrowseScreen(
                     InfiniteHorizontalScroll(
                         books = filteredNewReleases,
                         theme = theme,
-                        onBookClick = onBookClick
+                        searchQuery = searchQuery,
+                        onBookClick = onBookClick,
+                        onStartReading = onStartReading,
+                        onMarkCompleted = onMarkCompleted,
+                        onMoveToPlanToRead = onMoveToPlanToRead,
+                        onSetProgress = onSetProgress,
+                        onEditTags = onEditTags
                     )
                 }
             }
@@ -284,49 +331,6 @@ fun BrowseScreen(
     }
 }
 
-@Composable
-fun GenreFilterRow(
-    genres: List<String>,
-    selectedGenre: String,
-    onGenreSelected: (String) -> Unit,
-    theme: AppTheme
-) {
-    LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(horizontal = 16.dp)
-    ) {
-        items(genres) { genre ->
-            FilterChip(
-                onClick = { onGenreSelected(genre) },
-                label = {
-                    Text(
-                        text = genre,
-                        fontSize = 13.sp,
-                        color = if (selectedGenre == genre) {
-                            theme.surfaceColor
-                        } else {
-                            theme.primaryTextColor
-                        }
-                    )
-                },
-                selected = selectedGenre == genre,
-                enabled = true,
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = theme.accentColor,
-                    containerColor = theme.surfaceColor,
-                    selectedLabelColor = theme.surfaceColor,
-                    labelColor = theme.primaryTextColor
-                ),
-                border = FilterChipDefaults.filterChipBorder(
-                    borderColor = theme.secondaryTextColor.copy(alpha = 0.3f),
-                    selectedBorderColor = theme.accentColor,
-                    enabled = true,
-                    selected = selectedGenre == genre
-                )
-            )
-        }
-    }
-}
 
 @Composable
 fun BrowseSectionHeader(
@@ -363,20 +367,32 @@ fun BrowseSectionHeader(
 fun InfiniteHorizontalScroll(
     books: List<Book>,
     theme: AppTheme,
-    onBookClick: (Book) -> Unit
+    searchQuery: String = "",
+    onBookClick: (Book) -> Unit,
+    onStartReading: (String) -> Unit = {},
+    onMarkCompleted: (String) -> Unit = {},
+    onMoveToPlanToRead: (String) -> Unit = {},
+    onSetProgress: (String, Float) -> Unit = { _, _ -> },
+    onEditTags: (String, List<String>) -> Unit = { _, _ -> }
 ) {
     // Use the new circular implementation from BookSection
     InfiniteHorizontalBookScroll(
         books = books,
         showProgress = false,
         theme = theme,
+        searchQuery = searchQuery,
         contentPadding = PaddingValues(horizontal = 16.dp),
-        onBookClick = onBookClick
+        onBookClick = onBookClick,
+        onStartReading = onStartReading,
+        onMarkCompleted = onMarkCompleted,
+        onMoveToPlanToRead = onMoveToPlanToRead,
+        onSetProgress = onSetProgress,
+        onEditTags = onEditTags
     )
 }
 
-// Helper function to filter books
-private fun filterBooks(books: List<Book>, searchQuery: String, selectedGenre: String): List<Book> {
+// Helper function to filter books by multiple tags
+private fun filterBooksByTags(books: List<Book>, searchQuery: String, selectedTags: Set<String>): List<Book> {
     return books.filter { book ->
         val matchesSearch = if (searchQuery.isBlank()) {
             true
@@ -385,10 +401,213 @@ private fun filterBooks(books: List<Book>, searchQuery: String, selectedGenre: S
                     book.author.contains(searchQuery, ignoreCase = true)
         }
         
-        // For now, treat all books as "Manga" genre since we don't have genre data
-        val matchesGenre = selectedGenre == "All" || selectedGenre == "Manga"
+        val matchesTags = if (selectedTags.isEmpty()) {
+            true
+        } else {
+            selectedTags.all { tag -> book.hasTag(tag) }
+        }
         
-        matchesSearch && matchesGenre
+        matchesSearch && matchesTags
+    }
+}
+
+@Composable
+fun CollapsibleAllCategoriesFilter(
+    availableTagsByCategory: Map<TagCategory, List<Tag>>,
+    availableTagsForCurrentFilters: Map<TagCategory, List<Tag>>,
+    selectedTags: Set<String>,
+    expandedCategory: TagCategory?,
+    onTagToggled: (String) -> Unit,
+    onClearFilters: () -> Unit,
+    onCategoryToggled: (TagCategory) -> Unit,
+    theme: AppTheme
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        // Active Filters and Clear Filters Row
+        if (selectedTags.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Active Filters (${selectedTags.size})",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = theme.primaryTextColor
+                )
+                TextButton(
+                    onClick = onClearFilters,
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = theme.accentColor
+                    )
+                ) {
+                    Icon(
+                        Icons.Filled.Clear,
+                        contentDescription = "Clear filters",
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Clear All",
+                        fontSize = 12.sp
+                    )
+                }
+            }
+            
+            // Show active filters as chips
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(selectedTags.toList()) { tagId ->
+                    // Find the tag object to get its name and color
+                    val tag = availableTagsByCategory.values.flatten().find { it.id == tagId }
+                    tag?.let {
+                        FilterChip(
+                            onClick = { onTagToggled(tagId) },
+                            label = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = it.name,
+                                        fontSize = 12.sp,
+                                        color = Color.White
+                                    )
+                                    Icon(
+                                        Icons.Filled.Close,
+                                        contentDescription = "Remove filter",
+                                        modifier = Modifier.size(14.dp),
+                                        tint = Color.White
+                                    )
+                                }
+                            },
+                            selected = true,
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = it.color,
+                                selectedLabelColor = Color.White
+                            )
+                        )
+                    }
+                }
+            }
+        }
+        
+        // Category Selection Row
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Available categories
+            items(availableTagsByCategory.keys.toList()) { category ->
+                val hasAvailableTags = availableTagsForCurrentFilters[category]?.isNotEmpty() == true
+                val categoryHasSelectedTags = availableTagsByCategory[category]?.any { selectedTags.contains(it.id) } == true
+                
+                FilterChip(
+                    onClick = { onCategoryToggled(category) },
+                    enabled = hasAvailableTags || categoryHasSelectedTags,
+                    label = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = category.displayName,
+                                fontSize = 12.sp,
+                                color = when {
+                                    !hasAvailableTags && !categoryHasSelectedTags -> theme.secondaryTextColor.copy(alpha = 0.5f)
+                                    expandedCategory == category -> theme.primaryTextColor
+                                    else -> theme.primaryTextColor
+                                }
+                            )
+                            
+                            // Show count of selected tags in this category
+                            val selectedInCategory = availableTagsByCategory[category]?.count { selectedTags.contains(it.id) } ?: 0
+                            if (selectedInCategory > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(16.dp)
+                                        .background(
+                                            theme.accentColor,
+                                            RoundedCornerShape(8.dp)
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = selectedInCategory.toString(),
+                                        fontSize = 10.sp,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            
+                            Icon(
+                                if (expandedCategory == category) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = when {
+                                    !hasAvailableTags && !categoryHasSelectedTags -> theme.secondaryTextColor.copy(alpha = 0.5f)
+                                    else -> theme.primaryTextColor
+                                }
+                            )
+                        }
+                    },
+                    selected = expandedCategory == category,
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = theme.accentColor.copy(alpha = 0.2f),
+                        containerColor = theme.surfaceColor,
+                        disabledContainerColor = theme.surfaceColor.copy(alpha = 0.5f)
+                    )
+                )
+            }
+        }
+        
+        // Expanded Tag Selection
+        expandedCategory?.let { category ->
+            availableTagsByCategory[category]?.let { allTagsInCategory ->
+                val availableTagsInCategory = availableTagsForCurrentFilters[category] ?: emptyList()
+                
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(allTagsInCategory) { tag ->
+                        val isSelected = selectedTags.contains(tag.id)
+                        val isAvailable = availableTagsInCategory.contains(tag) || isSelected
+                        
+                        FilterChip(
+                            onClick = { onTagToggled(tag.id) },
+                            enabled = isAvailable,
+                            label = {
+                                Text(
+                                    text = tag.name,
+                                    fontSize = 12.sp,
+                                    color = when {
+                                        isSelected -> Color.White
+                                        !isAvailable -> theme.secondaryTextColor.copy(alpha = 0.5f)
+                                        else -> tag.color
+                                    }
+                                )
+                            },
+                            selected = isSelected,
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = tag.color,
+                                containerColor = tag.color.copy(alpha = 0.1f),
+                                selectedLabelColor = Color.White,
+                                labelColor = tag.color,
+                                disabledContainerColor = theme.surfaceColor.copy(alpha = 0.3f),
+                                disabledLabelColor = theme.secondaryTextColor.copy(alpha = 0.5f)
+                            )
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

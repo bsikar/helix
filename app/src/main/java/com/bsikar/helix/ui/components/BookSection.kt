@@ -31,7 +31,13 @@ fun BookSection(
     books: List<Book>,
     showProgress: Boolean,
     theme: AppTheme,
-    onBookClick: (Book) -> Unit = {}
+    searchQuery: String = "",
+    onBookClick: (Book) -> Unit = {},
+    onStartReading: (String) -> Unit = {},
+    onMarkCompleted: (String) -> Unit = {},
+    onMoveToPlanToRead: (String) -> Unit = {},
+    onSetProgress: (String, Float) -> Unit = { _, _ -> },
+    onEditTags: (String, List<String>) -> Unit = { _, _ -> }
 ) {
     Column {
         Row(
@@ -77,9 +83,15 @@ fun BookSection(
                 books = books,
                 showProgress = showProgress,
                 theme = theme,
+                searchQuery = searchQuery,
                 modifier = Modifier.height(240.dp),
                 contentPadding = PaddingValues(horizontal = 4.dp),
-                onBookClick = onBookClick
+                onBookClick = onBookClick,
+                onStartReading = onStartReading,
+                onMarkCompleted = onMarkCompleted,
+                onMoveToPlanToRead = onMoveToPlanToRead,
+                onSetProgress = onSetProgress,
+                onEditTags = onEditTags
             )
         } else {
             LazyVerticalGrid(
@@ -89,7 +101,18 @@ fun BookSection(
                 modifier = Modifier.height(200.dp)
             ) {
                 items(books) { book ->
-                    BookCard(book = book, showProgress = showProgress, theme = theme, onBookClick = onBookClick)
+                    BookCard(
+                        book = book, 
+                        showProgress = showProgress, 
+                        theme = theme, 
+                        searchQuery = searchQuery,
+                        onBookClick = onBookClick,
+                        onStartReading = onStartReading,
+                        onMarkCompleted = onMarkCompleted,
+                        onMoveToPlanToRead = onMoveToPlanToRead,
+                        onSetProgress = onSetProgress,
+                        onEditTags = onEditTags
+                    )
                 }
             }
         }
@@ -143,9 +166,15 @@ fun InfiniteHorizontalBookScroll(
     books: List<Book>,
     showProgress: Boolean,
     theme: AppTheme,
+    searchQuery: String = "",
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp),
-    onBookClick: (Book) -> Unit = {}
+    onBookClick: (Book) -> Unit = {},
+    onStartReading: (String) -> Unit = {},
+    onMarkCompleted: (String) -> Unit = {},
+    onMoveToPlanToRead: (String) -> Unit = {},
+    onSetProgress: (String, Float) -> Unit = { _, _ -> },
+    onEditTags: (String, List<String>) -> Unit = { _, _ -> }
 ) {
     if (books.isEmpty()) return
     
@@ -170,7 +199,13 @@ fun InfiniteHorizontalBookScroll(
                     book = book,
                     showProgress = showProgress,
                     theme = theme,
-                    onBookClick = onBookClick
+                    searchQuery = searchQuery,
+                    onBookClick = onBookClick,
+                    onStartReading = onStartReading,
+                    onMarkCompleted = onMarkCompleted,
+                    onMoveToPlanToRead = onMoveToPlanToRead,
+                    onSetProgress = onSetProgress,
+                    onEditTags = onEditTags
                 )
             }
         }
@@ -239,7 +274,13 @@ fun InfiniteHorizontalBookScroll(
                 book = book,
                 showProgress = showProgress,
                 theme = theme,
-                onBookClick = onBookClick
+                searchQuery = searchQuery,
+                onBookClick = onBookClick,
+                onStartReading = onStartReading,
+                onMarkCompleted = onMarkCompleted,
+                onMoveToPlanToRead = onMoveToPlanToRead,
+                onSetProgress = onSetProgress,
+                onEditTags = onEditTags
             )
         }
     }

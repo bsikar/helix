@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 data class UserPreferences(
     val themeMode: ThemeMode = ThemeMode.LIGHT,
@@ -35,6 +36,9 @@ class UserPreferencesManager(private val context: Context) {
     val preferences: State<UserPreferences> = derivedStateOf {
         _preferences.value ?: UserPreferences()
     }
+    
+    // Add a flag to ensure we've attempted to load preferences
+    private var hasInitialLoad = false
     
     private object PreferenceKeys {
         val THEME_MODE = stringPreferencesKey("theme_mode")
@@ -89,19 +93,30 @@ class UserPreferencesManager(private val context: Context) {
             try {
                 context.dataStore.data.collect { preferences ->
                     updatePreferencesFromDataStore(preferences)
+                    if (!hasInitialLoad) {
+                        hasInitialLoad = true
+                    }
                 }
             } catch (e: Exception) {
-                // If there's an error loading, initialize with defaults
+                // If there's an error loading, initialize with defaults but preserve any existing theme
                 e.printStackTrace()
-                _preferences.value = UserPreferences()
+                if (_preferences.value == null) {
+                    _preferences.value = UserPreferences()
+                    hasInitialLoad = true
+                }
             }
         }
     }
     
     private fun updatePreferencesFromDataStore(preferences: Preferences) {
-        val themeMode = ThemeMode.valueOf(
-            preferences[PreferenceKeys.THEME_MODE] ?: ThemeMode.LIGHT.name
-        )
+        val themeMode = try {
+            ThemeMode.valueOf(
+                preferences[PreferenceKeys.THEME_MODE] ?: ThemeMode.LIGHT.name
+            )
+        } catch (e: IllegalArgumentException) {
+            // If somehow an invalid theme mode was saved, default to LIGHT
+            ThemeMode.LIGHT
+        }
         
         val readerSettings = ReaderSettings(
             fontSize = preferences[PreferenceKeys.FONT_SIZE] ?: 16,
@@ -148,62 +163,69 @@ class UserPreferencesManager(private val context: Context) {
         
         val name = preferences[nameKey] ?: return null
         
-        val keys = when (slot) {
-            1 -> listOf(
-                PreferenceKeys.CUSTOM_PRESET_1_FONT_SIZE,
-                PreferenceKeys.CUSTOM_PRESET_1_LINE_HEIGHT,
-                PreferenceKeys.CUSTOM_PRESET_1_BRIGHTNESS,
-                PreferenceKeys.CUSTOM_PRESET_1_READING_MODE,
-                PreferenceKeys.CUSTOM_PRESET_1_FONT_FAMILY,
-                PreferenceKeys.CUSTOM_PRESET_1_TEXT_ALIGN,
-                PreferenceKeys.CUSTOM_PRESET_1_MARGIN_H,
-                PreferenceKeys.CUSTOM_PRESET_1_MARGIN_V
+        val settings = when (slot) {
+            1 -> ReaderSettings(
+                fontSize = preferences[PreferenceKeys.CUSTOM_PRESET_1_FONT_SIZE] ?: 16,
+                lineHeight = preferences[PreferenceKeys.CUSTOM_PRESET_1_LINE_HEIGHT] ?: 1.5f,
+                brightness = preferences[PreferenceKeys.CUSTOM_PRESET_1_BRIGHTNESS] ?: 1.0f,
+                readingMode = ReadingMode.valueOf(
+                    preferences[PreferenceKeys.CUSTOM_PRESET_1_READING_MODE] ?: ReadingMode.LIGHT.name
+                ),
+                fontFamily = preferences[PreferenceKeys.CUSTOM_PRESET_1_FONT_FAMILY] ?: "Default",
+                textAlign = TextAlignment.valueOf(
+                    preferences[PreferenceKeys.CUSTOM_PRESET_1_TEXT_ALIGN] ?: TextAlignment.JUSTIFY.name
+                ),
+                marginHorizontal = preferences[PreferenceKeys.CUSTOM_PRESET_1_MARGIN_H] ?: 24,
+                marginVertical = preferences[PreferenceKeys.CUSTOM_PRESET_1_MARGIN_V] ?: 16
             )
-            2 -> listOf(
-                PreferenceKeys.CUSTOM_PRESET_2_FONT_SIZE,
-                PreferenceKeys.CUSTOM_PRESET_2_LINE_HEIGHT,
-                PreferenceKeys.CUSTOM_PRESET_2_BRIGHTNESS,
-                PreferenceKeys.CUSTOM_PRESET_2_READING_MODE,
-                PreferenceKeys.CUSTOM_PRESET_2_FONT_FAMILY,
-                PreferenceKeys.CUSTOM_PRESET_2_TEXT_ALIGN,
-                PreferenceKeys.CUSTOM_PRESET_2_MARGIN_H,
-                PreferenceKeys.CUSTOM_PRESET_2_MARGIN_V
+            2 -> ReaderSettings(
+                fontSize = preferences[PreferenceKeys.CUSTOM_PRESET_2_FONT_SIZE] ?: 16,
+                lineHeight = preferences[PreferenceKeys.CUSTOM_PRESET_2_LINE_HEIGHT] ?: 1.5f,
+                brightness = preferences[PreferenceKeys.CUSTOM_PRESET_2_BRIGHTNESS] ?: 1.0f,
+                readingMode = ReadingMode.valueOf(
+                    preferences[PreferenceKeys.CUSTOM_PRESET_2_READING_MODE] ?: ReadingMode.LIGHT.name
+                ),
+                fontFamily = preferences[PreferenceKeys.CUSTOM_PRESET_2_FONT_FAMILY] ?: "Default",
+                textAlign = TextAlignment.valueOf(
+                    preferences[PreferenceKeys.CUSTOM_PRESET_2_TEXT_ALIGN] ?: TextAlignment.JUSTIFY.name
+                ),
+                marginHorizontal = preferences[PreferenceKeys.CUSTOM_PRESET_2_MARGIN_H] ?: 24,
+                marginVertical = preferences[PreferenceKeys.CUSTOM_PRESET_2_MARGIN_V] ?: 16
             )
-            3 -> listOf(
-                PreferenceKeys.CUSTOM_PRESET_3_FONT_SIZE,
-                PreferenceKeys.CUSTOM_PRESET_3_LINE_HEIGHT,
-                PreferenceKeys.CUSTOM_PRESET_3_BRIGHTNESS,
-                PreferenceKeys.CUSTOM_PRESET_3_READING_MODE,
-                PreferenceKeys.CUSTOM_PRESET_3_FONT_FAMILY,
-                PreferenceKeys.CUSTOM_PRESET_3_TEXT_ALIGN,
-                PreferenceKeys.CUSTOM_PRESET_3_MARGIN_H,
-                PreferenceKeys.CUSTOM_PRESET_3_MARGIN_V
+            3 -> ReaderSettings(
+                fontSize = preferences[PreferenceKeys.CUSTOM_PRESET_3_FONT_SIZE] ?: 16,
+                lineHeight = preferences[PreferenceKeys.CUSTOM_PRESET_3_LINE_HEIGHT] ?: 1.5f,
+                brightness = preferences[PreferenceKeys.CUSTOM_PRESET_3_BRIGHTNESS] ?: 1.0f,
+                readingMode = ReadingMode.valueOf(
+                    preferences[PreferenceKeys.CUSTOM_PRESET_3_READING_MODE] ?: ReadingMode.LIGHT.name
+                ),
+                fontFamily = preferences[PreferenceKeys.CUSTOM_PRESET_3_FONT_FAMILY] ?: "Default",
+                textAlign = TextAlignment.valueOf(
+                    preferences[PreferenceKeys.CUSTOM_PRESET_3_TEXT_ALIGN] ?: TextAlignment.JUSTIFY.name
+                ),
+                marginHorizontal = preferences[PreferenceKeys.CUSTOM_PRESET_3_MARGIN_H] ?: 24,
+                marginVertical = preferences[PreferenceKeys.CUSTOM_PRESET_3_MARGIN_V] ?: 16
             )
             else -> return null
         }
-        
-        val settings = ReaderSettings(
-            fontSize = preferences[keys[0] as Preferences.Key<Int>] ?: 16,
-            lineHeight = preferences[keys[1] as Preferences.Key<Float>] ?: 1.5f,
-            brightness = preferences[keys[2] as Preferences.Key<Float>] ?: 1.0f,
-            readingMode = ReadingMode.valueOf(
-                preferences[keys[3] as Preferences.Key<String>] ?: ReadingMode.LIGHT.name
-            ),
-            fontFamily = preferences[keys[4] as Preferences.Key<String>] ?: "Default",
-            textAlign = TextAlignment.valueOf(
-                preferences[keys[5] as Preferences.Key<String>] ?: TextAlignment.JUSTIFY.name
-            ),
-            marginHorizontal = preferences[keys[6] as Preferences.Key<Int>] ?: 24,
-            marginVertical = preferences[keys[7] as Preferences.Key<Int>] ?: 16
-        )
         
         return ReaderPreset(name = name, settings = settings, isCustom = true)
     }
     
     fun updateTheme(themeMode: ThemeMode) {
+        // Update the in-memory state immediately to prevent flashing
+        _preferences.value = _preferences.value?.copy(themeMode = themeMode) 
+            ?: UserPreferences(themeMode = themeMode)
+        
+        // Then persist to DataStore
         scope.launch {
-            context.dataStore.edit { preferences ->
-                preferences[PreferenceKeys.THEME_MODE] = themeMode.name
+            try {
+                context.dataStore.edit { preferences ->
+                    preferences[PreferenceKeys.THEME_MODE] = themeMode.name
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                // If saving fails, at least keep the in-memory state
             }
         }
     }
@@ -293,5 +315,9 @@ class UserPreferencesManager(private val context: Context) {
     fun resetToDefaults() {
         val defaultSettings = ReaderPreset.getDefaultSettings()
         updateReaderSettings(defaultSettings, null, PresetType.DEFAULT)
+    }
+    
+    fun hasInitialLoadCompleted(): Boolean {
+        return hasInitialLoad
     }
 }

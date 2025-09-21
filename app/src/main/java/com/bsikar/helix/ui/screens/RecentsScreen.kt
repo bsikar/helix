@@ -1,7 +1,9 @@
 package com.bsikar.helix.ui.screens
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,11 +24,14 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bsikar.helix.data.Book
-import com.bsikar.helix.data.RecentBook
+import com.bsikar.helix.data.BookRepository
+import com.bsikar.helix.data.ReadingStatus
 import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.theme.ThemeManager
 import com.bsikar.helix.theme.ThemeMode
 import com.bsikar.helix.ui.components.SearchBar
+import com.bsikar.helix.ui.components.TagEditorDialog
+import com.bsikar.helix.ui.components.HighlightedText
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,70 +39,33 @@ fun RecentsScreen(
     selectedTab: Int = 1,
     onTabSelected: (Int) -> Unit = {},
     theme: AppTheme,
+    recentBooks: List<Book>,
     onNavigateToSettings: () -> Unit = {},
-    onBookClick: (Book) -> Unit = {}
+    onBookClick: (Book) -> Unit = {},
+    onStartReading: (String) -> Unit = {},
+    onMarkCompleted: (String) -> Unit = {},
+    onMoveToPlanToRead: (String) -> Unit = {},
+    onSetProgress: (String, Float) -> Unit = { _, _ -> },
+    onEditTags: (String, List<String>) -> Unit = { _, _ -> }
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var sortBy by remember { mutableStateOf("Recent") }
-    
-    // Sample recent books data
-    val recentBooks = remember {
-        val currentTime = System.currentTimeMillis()
-        listOf(
-            RecentBook(
-                book = Book("Clockwork Planet", "Yuu Kamiya", Color(0xFFFFD700), 0.8f),
-                lastAccessTime = currentTime - (2 * 60 * 1000), // 2 minutes ago
-                lastReadPage = 120,
-                totalPages = 150
-            ),
-            RecentBook(
-                book = Book("Akame ga Kill!", "Takahiro", Color(0xFF8B0000), 0.3f),
-                lastAccessTime = currentTime - (1 * 60 * 60 * 1000), // 1 hour ago
-                lastReadPage = 45,
-                totalPages = 150
-            ),
-            RecentBook(
-                book = Book("Death Note", "Tsugumi Ohba", Color(0xFF000000), 0.6f),
-                lastAccessTime = currentTime - (3 * 60 * 60 * 1000), // 3 hours ago
-                lastReadPage = 90,
-                totalPages = 150
-            ),
-            RecentBook(
-                book = Book("One Piece", "Eiichiro Oda", Color(0xFF4169E1), 0.2f),
-                lastAccessTime = currentTime - (1 * 24 * 60 * 60 * 1000), // 1 day ago
-                lastReadPage = 30,
-                totalPages = 150
-            ),
-            RecentBook(
-                book = Book("Demon Slayer", "Koyoharu Gotouge", Color(0xFF2E8B57), 0.9f),
-                lastAccessTime = currentTime - (2 * 24 * 60 * 60 * 1000), // 2 days ago
-                lastReadPage = 135,
-                totalPages = 150
-            ),
-            RecentBook(
-                book = Book("Spy x Family", "Tatsuya Endo", Color(0xFFFF1493), 0.4f),
-                lastAccessTime = currentTime - (5 * 24 * 60 * 60 * 1000), // 5 days ago
-                lastReadPage = 60,
-                totalPages = 150
-            )
-        )
-    }
     
     // Filter and sort recent books
     val filteredRecentBooks = remember(searchQuery, sortBy, recentBooks) {
         val filtered = if (searchQuery.isBlank()) {
             recentBooks
         } else {
-            recentBooks.filter { recentBook ->
-                recentBook.book.title.contains(searchQuery, ignoreCase = true) ||
-                        recentBook.book.author.contains(searchQuery, ignoreCase = true)
+            recentBooks.filter { book ->
+                book.title.contains(searchQuery, ignoreCase = true) ||
+                        book.author.contains(searchQuery, ignoreCase = true)
             }
         }
         
         when (sortBy) {
-            "Recent" -> filtered.sortedByDescending { it.lastAccessTime }
-            "Title" -> filtered.sortedBy { it.book.title }
-            "Progress" -> filtered.sortedByDescending { it.book.progress }
+            "Recent" -> filtered.sortedByDescending { it.lastReadTimestamp }
+            "Title" -> filtered.sortedBy { it.title }
+            "Progress" -> filtered.sortedByDescending { it.progress }
             else -> filtered
         }
     }
@@ -222,11 +190,17 @@ fun RecentsScreen(
 
             // Recent books list
             if (filteredRecentBooks.isNotEmpty()) {
-                items(filteredRecentBooks) { recentBook ->
+                items(filteredRecentBooks, key = { it.id }) { book ->
                     RecentBookItem(
-                        recentBook = recentBook,
+                        book = book,
                         theme = theme,
-                        onBookClick = { onBookClick(recentBook.book) }
+                        searchQuery = searchQuery,
+                        onBookClick = { onBookClick(book) },
+                        onStartReading = onStartReading,
+                        onMarkCompleted = onMarkCompleted,
+                        onMoveToPlanToRead = onMoveToPlanToRead,
+                        onSetProgress = onSetProgress,
+                        onEditTags = onEditTags
                     )
                 }
             } else {
@@ -299,17 +273,29 @@ fun SortOptionsRow(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun RecentBookItem(
-    recentBook: RecentBook,
+    book: Book,
     theme: AppTheme,
-    onBookClick: () -> Unit
+    searchQuery: String = "",
+    onBookClick: () -> Unit,
+    onStartReading: (String) -> Unit = {},
+    onMarkCompleted: (String) -> Unit = {},
+    onMoveToPlanToRead: (String) -> Unit = {},
+    onSetProgress: (String, Float) -> Unit = { _, _ -> },
+    onEditTags: (String, List<String>) -> Unit = { _, _ -> }
 ) {
+    var showContextMenu by remember { mutableStateOf(false) }
+    var showTagEditor by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
-            .clickable { onBookClick() },
+            .combinedClickable(
+                onClick = { onBookClick() },
+                onLongClick = { showContextMenu = true }
+            ),
         colors = CardDefaults.cardColors(
             containerColor = theme.surfaceColor
         ),
@@ -327,7 +313,7 @@ fun RecentBookItem(
                     .width(60.dp)
                     .aspectRatio(0.68f)
                     .clip(RoundedCornerShape(6.dp))
-                    .background(recentBook.book.coverColor)
+                    .background(book.coverColor)
             )
             
             // Book info
@@ -338,20 +324,21 @@ fun RecentBookItem(
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
                 Column {
-                    Text(
-                        text = recentBook.book.title,
+                    HighlightedText(
+                        text = book.title,
+                        searchQuery = searchQuery,
+                        normalColor = theme.primaryTextColor,
+                        highlightColor = theme.accentColor,
                         fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = theme.primaryTextColor,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
+                        fontWeight = FontWeight.SemiBold
                     )
-                    Text(
-                        text = recentBook.book.author,
+                    HighlightedText(
+                        text = book.author,
+                        searchQuery = searchQuery,
+                        normalColor = theme.secondaryTextColor,
+                        highlightColor = theme.accentColor,
                         fontSize = 13.sp,
-                        color = theme.secondaryTextColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        fontWeight = FontWeight.Normal
                     )
                 }
                 
@@ -361,16 +348,11 @@ fun RecentBookItem(
                 Column {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.End,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Page ${recentBook.lastReadPage} of ${recentBook.totalPages}",
-                            fontSize = 12.sp,
-                            color = theme.secondaryTextColor
-                        )
-                        Text(
-                            text = "${recentBook.getProgressPercentage()}%",
+                            text = "${(book.progress * 100).toInt()}%",
                             fontSize = 12.sp,
                             color = theme.accentColor,
                             fontWeight = FontWeight.Medium
@@ -380,7 +362,7 @@ fun RecentBookItem(
                     Spacer(modifier = Modifier.height(4.dp))
                     
                     LinearProgressIndicator(
-                        progress = { recentBook.book.progress },
+                        progress = { book.progress },
                         modifier = Modifier.fillMaxWidth(),
                         color = theme.accentColor,
                         trackColor = theme.secondaryTextColor.copy(alpha = 0.2f)
@@ -390,12 +372,157 @@ fun RecentBookItem(
             
             // Last accessed time
             Text(
-                text = recentBook.getTimeAgoText(),
+                text = book.getTimeAgoText(),
                 fontSize = 11.sp,
                 color = theme.secondaryTextColor,
                 modifier = Modifier.align(Alignment.Top)
             )
         }
+    }
+    
+    if (showContextMenu) {
+        DropdownMenu(
+            expanded = showContextMenu,
+            onDismissRequest = { showContextMenu = false },
+            modifier = Modifier.background(theme.surfaceColor)
+        ) {
+            when (book.readingStatus) {
+                ReadingStatus.PLAN_TO_READ -> {
+                    DropdownMenuItem(
+                        text = { 
+                            Text(
+                                "Start Reading",
+                                color = theme.primaryTextColor
+                            )
+                        },
+                        onClick = {
+                            onStartReading(book.id)
+                            showContextMenu = false
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.PlayArrow,
+                                contentDescription = null,
+                                tint = theme.accentColor
+                            )
+                        }
+                    )
+                }
+                ReadingStatus.READING -> {
+                    DropdownMenuItem(
+                        text = { 
+                            Text(
+                                "Mark as Completed",
+                                color = theme.primaryTextColor
+                            )
+                        },
+                        onClick = {
+                            onMarkCompleted(book.id)
+                            showContextMenu = false
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.CheckCircle,
+                                contentDescription = null,
+                                tint = theme.accentColor
+                            )
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { 
+                            Text(
+                                "Move to Plan to Read",
+                                color = theme.primaryTextColor
+                            )
+                        },
+                        onClick = {
+                            onMoveToPlanToRead(book.id)
+                            showContextMenu = false
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.Schedule,
+                                contentDescription = null,
+                                tint = theme.secondaryTextColor
+                            )
+                        }
+                    )
+                }
+                ReadingStatus.COMPLETED -> {
+                    DropdownMenuItem(
+                        text = { 
+                            Text(
+                                "Move to Plan to Read",
+                                color = theme.primaryTextColor
+                            )
+                        },
+                        onClick = {
+                            onMoveToPlanToRead(book.id)
+                            showContextMenu = false
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.Schedule,
+                                contentDescription = null,
+                                tint = theme.secondaryTextColor
+                            )
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { 
+                            Text(
+                                "Mark as Reading",
+                                color = theme.primaryTextColor
+                            )
+                        },
+                        onClick = {
+                            onStartReading(book.id)
+                            showContextMenu = false
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.Book,
+                                contentDescription = null,
+                                tint = theme.accentColor
+                            )
+                        }
+                    )
+                }
+            }
+            
+            // Add "Edit Tags" option for all books
+            DropdownMenuItem(
+                text = { 
+                    Text(
+                        "Edit Tags",
+                        color = theme.primaryTextColor
+                    )
+                },
+                onClick = {
+                    showTagEditor = true
+                    showContextMenu = false
+                },
+                leadingIcon = {
+                    Icon(
+                        Icons.Filled.Edit,
+                        contentDescription = null,
+                        tint = theme.accentColor
+                    )
+                }
+            )
+        }
+    }
+    
+    // Tag Editor Dialog
+    if (showTagEditor) {
+        TagEditorDialog(
+            book = book,
+            theme = theme,
+            onDismiss = { showTagEditor = false },
+            onTagsUpdated = { newTags: List<String> ->
+                onEditTags(book.id, newTags)
+            }
+        )
     }
 }
 
@@ -407,6 +534,7 @@ fun RecentsScreenPreview() {
         RecentsScreen(
             selectedTab = 1,
             theme = theme,
+            recentBooks = BookRepository.getRecentBooks(),
             onNavigateToSettings = { },
             onBookClick = { }
         )

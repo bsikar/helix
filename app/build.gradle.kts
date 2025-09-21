@@ -65,6 +65,10 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.4")
     
+    // ViewModel for state management
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
+    
     // Kotlinx Serialization for reading progress persistence
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
     
@@ -77,20 +81,19 @@ dependencies {
     // System UI Controller for status bar styling
     implementation("com.google.accompanist:accompanist-systemuicontroller:0.32.0")
     
-    // Test dependencies commented out to avoid Gradle task creation issues
-    // testImplementation(libs.junit)
-    // androidTestImplementation(libs.androidx.junit)
-    // androidTestImplementation(libs.androidx.espresso.core)
+    // Test dependencies for unit testing
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.mockito:mockito-core:5.5.0")
+    testImplementation("org.mockito.kotlin:mockito-kotlin:5.1.0")
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
     
     
 }
 
-// Disable all test-related and lint tasks
+// Allow unit tests but disable Android tests and lint tasks to avoid issues
 tasks.configureEach {
-    if (name.contains("test", ignoreCase = true) || 
-        name.contains("Test") || 
-        name.contains("UnitTest") || 
-        name.contains("AndroidTest") ||
+    if (name.contains("AndroidTest") ||
         name.contains("Instrumentation") ||
         name.contains("lint", ignoreCase = true)) {
         enabled = false

@@ -31,9 +31,17 @@ fun LibraryScreen(
     currentTheme: ThemeMode,
     onThemeChange: (ThemeMode) -> Unit,
     theme: AppTheme,
+    readingBooks: List<Book>,
+    planToReadBooks: List<Book>,
+    completedBooks: List<Book>,
     onNavigateToSettings: () -> Unit = {},
     onBookClick: (Book) -> Unit = {},
-    onSeeAllClick: (String, List<Book>) -> Unit = { _, _ -> }
+    onSeeAllClick: (String, List<Book>) -> Unit = { _, _ -> },
+    onStartReading: (String) -> Unit = {},
+    onMarkCompleted: (String) -> Unit = {},
+    onMoveToPlanToRead: (String) -> Unit = {},
+    onSetProgress: (String, Float) -> Unit = { _, _ -> },
+    onEditTags: (String, List<String>) -> Unit = { _, _ -> }
 ) {
     var searchQuery by remember { mutableStateOf("") }
 
@@ -41,60 +49,11 @@ fun LibraryScreen(
     var planToReadSortAscending by remember { mutableStateOf(true) }
     var readSortAscending by remember { mutableStateOf(true) }
 
-    val allRecentBooks = remember {
-        listOf(
-            Book("Kaguya-sama", "Aka Akasaka", Color(0xFFFF69B4), 0.6f),
-            Book("Clockwork Planet", "Yuu Kamiya", Color(0xFFFFD700), 0.8f),
-            Book("Akame ga Kill!", "Takahiro", Color(0xFF8B0000), 0.3f),
-            Book("Dr. Stone", "Riichiro Inagaki", Color(0xFF00CED1), 0.4f),
-            Book("Fire Force", "Atsushi Ohkubo", Color(0xFFDC143C), 0.7f),
-            Book("Black Clover", "Yuki Tabata", Color(0xFF2F4F4F), 0.2f)
-        )
-    }
-
-    val planToReadBooks = remember {
-        listOf(
-            Book("Akane-Banashi", "Yuki Suenaga", Color(0xFF4169E1)),
-            Book("Dandadan", "Yukinobu Tatsu", Color(0xFF32CD32)),
-            Book("Jujutsu Kaisen", "Gege Akutami", Color(0xFF8A2BE2)),
-            Book("Chainsaw Man", "Tatsuki Fujimoto", Color(0xFFFF4500)),
-            Book("One Punch Man", "ONE", Color(0xFFD4AF37)),
-            Book("Vinland Saga", "Makoto Yukimura", Color(0xFFC0C0C0))
-        )
-    }
-    val readBooks = remember {
-        listOf(
-            Book("Attack on Titan", "Hajime Isayama", Color(0xFF8B4513), 1.0f),
-            Book("Death Note", "Tsugumi Ohba", Color(0xFF000000), 1.0f),
-            Book("Fullmetal Alchemist", "Hiromu Arakawa", Color(0xFFFFD700), 1.0f),
-            Book("Hunter x Hunter", "Yoshihiro Togashi", Color(0xFF228B22), 1.0f),
-            Book("Tokyo Ghoul", "Sui Ishida", Color(0xFF8B0000), 1.0f),
-            Book("Mob Psycho 100", "ONE", Color(0xFF9932CC), 1.0f),
-            Book("Demon Slayer", "Koyoharu Gotouge", Color(0xFF2E8B57), 1.0f),
-            Book("My Hero Academia", "Kohei Horikoshi", Color(0xFF32CD32), 1.0f),
-            Book("Bleach", "Tite Kubo", Color(0xFF4B0082), 1.0f),
-            Book("Naruto", "Masashi Kishimoto", Color(0xFFFF8C00), 1.0f),
-            Book("One Piece", "Eiichiro Oda", Color(0xFF4169E1), 1.0f),
-            Book("Dragon Ball", "Akira Toriyama", Color(0xFFDB4437), 1.0f),
-            Book("Berserk", "Kentaro Miura", Color(0xFF424242), 1.0f),
-            Book("Vagabond", "Takehiko Inoue", Color(0xFF795548), 1.0f),
-            Book("Slam Dunk", "Takehiko Inoue", Color(0xFFD32F2F), 1.0f),
-            Book("JoJo's Bizarre Adventure", "Hirohiko Araki", Color(0xFFFF6347), 1.0f),
-            Book("The Promised Neverland", "Kaiu Shirai", Color(0xFF8FBC8F), 1.0f),
-            Book("Haikyuu!!", "Haruichi Furudate", Color(0xFFFF7F50), 1.0f),
-            Book("Spy x Family", "Tatsuya Endo", Color(0xFFFF1493), 1.0f),
-            Book("Chainsaw Man", "Tatsuki Fujimoto", Color(0xFFFF4500), 1.0f),
-            Book("Jujutsu Kaisen", "Gege Akutami", Color(0xFF8A2BE2), 1.0f),
-            Book("Vinland Saga", "Makoto Yukimura", Color(0xFFC0C0C0), 1.0f),
-            Book("Blue Lock", "Muneyuki Kaneshiro", Color(0xFF0000FF), 1.0f)
-        )
-    }
-
-    val filteredReadingBooks = remember(searchQuery, allRecentBooks, readingSortAscending) {
+    val filteredReadingBooks = remember(searchQuery, readingBooks, readingSortAscending) {
         val filtered = if (searchQuery.isBlank()) {
-            allRecentBooks
+            readingBooks
         } else {
-            allRecentBooks.filter { book ->
+            readingBooks.filter { book ->
                 book.title.contains(searchQuery, ignoreCase = true) ||
                         book.author.contains(searchQuery, ignoreCase = true)
             }
@@ -122,11 +81,11 @@ fun LibraryScreen(
         }
     }
 
-    val filteredReadBooks = remember(searchQuery, readBooks, readSortAscending) {
+    val filteredReadBooks = remember(searchQuery, completedBooks, readSortAscending) {
         val filtered = if (searchQuery.isBlank()) {
-            readBooks
+            completedBooks
         } else {
-            readBooks.filter { book ->
+            completedBooks.filter { book ->
                 book.title.contains(searchQuery, ignoreCase = true) ||
                         book.author.contains(searchQuery, ignoreCase = true)
             }
@@ -264,8 +223,14 @@ fun LibraryScreen(
                         books = filteredReadingBooks,
                         showProgress = true,
                         theme = theme,
+                        searchQuery = searchQuery,
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        onBookClick = onBookClick
+                        onBookClick = onBookClick,
+                        onStartReading = onStartReading,
+                        onMarkCompleted = onMarkCompleted,
+                        onMoveToPlanToRead = onMoveToPlanToRead,
+                        onSetProgress = onSetProgress,
+                        onEditTags = onEditTags
                     )
                 }
             }
@@ -286,8 +251,14 @@ fun LibraryScreen(
                         books = filteredPlanToReadBooks,
                         showProgress = false,
                         theme = theme,
+                        searchQuery = searchQuery,
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        onBookClick = onBookClick
+                        onBookClick = onBookClick,
+                        onStartReading = onStartReading,
+                        onMarkCompleted = onMarkCompleted,
+                        onMoveToPlanToRead = onMoveToPlanToRead,
+                        onSetProgress = onSetProgress,
+                        onEditTags = onEditTags
                     )
                 }
             }
@@ -308,8 +279,14 @@ fun LibraryScreen(
                         books = filteredReadBooks,
                         showProgress = false,
                         theme = theme,
+                        searchQuery = searchQuery,
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        onBookClick = onBookClick
+                        onBookClick = onBookClick,
+                        onStartReading = onStartReading,
+                        onMarkCompleted = onMarkCompleted,
+                        onMoveToPlanToRead = onMoveToPlanToRead,
+                        onSetProgress = onSetProgress,
+                        onEditTags = onEditTags
                     )
                 }
             }
