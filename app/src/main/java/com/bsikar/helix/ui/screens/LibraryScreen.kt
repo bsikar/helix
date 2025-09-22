@@ -25,6 +25,7 @@ import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.theme.ThemeMode
 import com.bsikar.helix.ui.components.InfiniteHorizontalBookScroll
 import com.bsikar.helix.ui.components.SearchBar
+import com.bsikar.helix.ui.components.SearchUtils
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -47,11 +48,43 @@ fun LibraryScreen(
     onMoveToPlanToRead: (String) -> Unit = {},
     onSetProgress: (String, Float) -> Unit = { _, _ -> },
     onEditTags: (String, List<String>) -> Unit = { _, _ -> },
+    onUpdateBookSettings: (com.bsikar.helix.data.Book) -> Unit = { _ -> },
     libraryManager: LibraryManager? = null
 ) {
     var searchQuery by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     var isRefreshing by remember { mutableStateOf(false) }
+    
+    // Create mutable internal lists to allow book updates
+    // Use a key that includes book properties to detect internal book changes
+    val readingBooksKey = readingBooks.map { "${it.id}-${it.coverDisplayMode}-${it.userSelectedColor}" }.joinToString(",")
+    val planToReadBooksKey = planToReadBooks.map { "${it.id}-${it.coverDisplayMode}-${it.userSelectedColor}" }.joinToString(",")
+    val completedBooksKey = completedBooks.map { "${it.id}-${it.coverDisplayMode}-${it.userSelectedColor}" }.joinToString(",")
+    
+    var internalReadingBooks by remember(readingBooksKey) { mutableStateOf(readingBooks) }
+    var internalPlanToReadBooks by remember(planToReadBooksKey) { mutableStateOf(planToReadBooks) }
+    var internalCompletedBooks by remember(completedBooksKey) { mutableStateOf(completedBooks) }
+    
+    // Function to update a book in the appropriate list
+    val updateBookInLists = { updatedBook: Book ->
+        // Update in reading books
+        internalReadingBooks = internalReadingBooks.map { book ->
+            if (book.id == updatedBook.id) updatedBook else book
+        }
+        
+        // Update in plan to read books
+        internalPlanToReadBooks = internalPlanToReadBooks.map { book ->
+            if (book.id == updatedBook.id) updatedBook else book
+        }
+        
+        // Update in completed books
+        internalCompletedBooks = internalCompletedBooks.map { book ->
+            if (book.id == updatedBook.id) updatedBook else book
+        }
+        
+        // Also call the parent's update function if provided
+        onUpdateBookSettings(updatedBook)
+    }
     
     // Get import progress from LibraryManager
     val importProgress by libraryManager?.importProgress ?: remember { mutableStateOf<ImportProgress?>(null) }
@@ -82,51 +115,63 @@ fun LibraryScreen(
     var planToReadSortAscending by remember { mutableStateOf(true) }
     var readSortAscending by remember { mutableStateOf(true) }
 
-    val filteredReadingBooks = remember(searchQuery, readingBooks, readingSortAscending) {
+    val filteredReadingBooks = remember(searchQuery, internalReadingBooks, readingSortAscending) {
         val filtered = if (searchQuery.isBlank()) {
-            readingBooks
+            internalReadingBooks.map { SearchUtils.SearchResult(it, 1.0) }
         } else {
-            readingBooks.filter { book ->
-                book.title.contains(searchQuery, ignoreCase = true) ||
-                        book.author.contains(searchQuery, ignoreCase = true)
-            }
+            SearchUtils.fuzzySearch(
+                items = internalReadingBooks,
+                query = searchQuery,
+                getText = { it.title },
+                getSecondaryText = { it.author },
+                threshold = 0.5
+            )
         }
+        val books = filtered.map { it.item }
         if (readingSortAscending) {
-            filtered.reversed()
+            books.reversed()
         } else {
-            filtered
+            books
         }
     }
 
-    val filteredPlanToReadBooks = remember(searchQuery, planToReadBooks, planToReadSortAscending) {
+    val filteredPlanToReadBooks = remember(searchQuery, internalPlanToReadBooks, planToReadSortAscending) {
         val filtered = if (searchQuery.isBlank()) {
-            planToReadBooks
+            internalPlanToReadBooks.map { SearchUtils.SearchResult(it, 1.0) }
         } else {
-            planToReadBooks.filter { book ->
-                book.title.contains(searchQuery, ignoreCase = true) ||
-                        book.author.contains(searchQuery, ignoreCase = true)
-            }
+            SearchUtils.fuzzySearch(
+                items = internalPlanToReadBooks,
+                query = searchQuery,
+                getText = { it.title },
+                getSecondaryText = { it.author },
+                threshold = 0.5
+            )
         }
+        val books = filtered.map { it.item }
         if (planToReadSortAscending) {
-            filtered.sortedBy { it.title }
+            books.sortedBy { it.title }
         } else {
-            filtered.sortedByDescending { it.title }
+            books.sortedByDescending { it.title }
         }
     }
 
-    val filteredReadBooks = remember(searchQuery, completedBooks, readSortAscending) {
+    val filteredReadBooks = remember(searchQuery, internalCompletedBooks, readSortAscending) {
         val filtered = if (searchQuery.isBlank()) {
-            completedBooks
+            internalCompletedBooks.map { SearchUtils.SearchResult(it, 1.0) }
         } else {
-            completedBooks.filter { book ->
-                book.title.contains(searchQuery, ignoreCase = true) ||
-                        book.author.contains(searchQuery, ignoreCase = true)
-            }
+            SearchUtils.fuzzySearch(
+                items = internalCompletedBooks,
+                query = searchQuery,
+                getText = { it.title },
+                getSecondaryText = { it.author },
+                threshold = 0.5
+            )
         }
+        val books = filtered.map { it.item }
         if (readSortAscending) {
-            filtered.sortedBy { it.title }
+            books.sortedBy { it.title }
         } else {
-            filtered.sortedByDescending { it.title }
+            books.sortedByDescending { it.title }
         }
     }
 
@@ -237,7 +282,7 @@ fun LibraryScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
 
-            item {
+            item(key = "search_bar") {
                 SearchBar(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
@@ -247,7 +292,9 @@ fun LibraryScreen(
             
             // Show import progress in library view
             importProgress?.let { progress ->
-                item {
+                // Only show progress if we have a valid total count
+                if (progress.displayTotal > 0) {
+                    item(key = "import_progress") {
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -264,7 +311,7 @@ fun LibraryScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             CircularProgressIndicator(
-                                progress = progress.percentage / 100f,
+                                progress = { progress.percentage / 100f },
                                 modifier = Modifier.size(20.dp),
                                 color = theme.accentColor,
                                 strokeWidth = 2.dp
@@ -277,7 +324,7 @@ fun LibraryScreen(
                                     fontWeight = FontWeight.Medium
                                 )
                                 Text(
-                                    text = "${progress.current} of ${progress.total} files",
+                                    text = if (progress.displayTotal > 0) "${progress.displayCurrent} of ${progress.displayTotal} files" else "Preparing...",
                                     color = theme.secondaryTextColor,
                                     fontSize = 11.sp
                                 )
@@ -290,12 +337,13 @@ fun LibraryScreen(
                             )
                         }
                     }
+                    }
                 }
             }
             
             // Show scan status message
             if (scanMessage.isNotEmpty()) {
-                item {
+                item(key = "scan_message") {
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -337,7 +385,7 @@ fun LibraryScreen(
             }
 
             if (filteredReadingBooks.isNotEmpty()) {
-                item {
+                item(key = "reading_header") {
                     LibrarySectionHeader(
                         title = "Reading",
                         subtitle = "Last read",
@@ -347,7 +395,7 @@ fun LibraryScreen(
                         onSeeAllClick = { onSeeAllClick("Reading", filteredReadingBooks) }
                     )
                 }
-                item {
+                item(key = "reading_books") {
                     InfiniteHorizontalBookScroll(
                         books = filteredReadingBooks,
                         showProgress = true,
@@ -359,13 +407,14 @@ fun LibraryScreen(
                         onMarkCompleted = onMarkCompleted,
                         onMoveToPlanToRead = onMoveToPlanToRead,
                         onSetProgress = onSetProgress,
-                        onEditTags = onEditTags
+                        onEditTags = onEditTags,
+                        onUpdateBookSettings = updateBookInLists
                     )
                 }
             }
 
             if (filteredPlanToReadBooks.isNotEmpty()) {
-                item {
+                item(key = "plan_to_read_header") {
                     LibrarySectionHeader(
                         title = "Plan to read",
                         subtitle = "Title",
@@ -375,7 +424,7 @@ fun LibraryScreen(
                         onSeeAllClick = { onSeeAllClick("Plan to read", filteredPlanToReadBooks) }
                     )
                 }
-                item {
+                item(key = "plan_to_read_books") {
                     InfiniteHorizontalBookScroll(
                         books = filteredPlanToReadBooks,
                         showProgress = false,
@@ -387,13 +436,14 @@ fun LibraryScreen(
                         onMarkCompleted = onMarkCompleted,
                         onMoveToPlanToRead = onMoveToPlanToRead,
                         onSetProgress = onSetProgress,
-                        onEditTags = onEditTags
+                        onEditTags = onEditTags,
+                        onUpdateBookSettings = updateBookInLists
                     )
                 }
             }
 
             if (filteredReadBooks.isNotEmpty()) {
-                item {
+                item(key = "read_header") {
                     LibrarySectionHeader(
                         title = "Read",
                         subtitle = "Title",
@@ -403,7 +453,7 @@ fun LibraryScreen(
                         onSeeAllClick = { onSeeAllClick("Read", filteredReadBooks) }
                     )
                 }
-                item {
+                item(key = "read_books") {
                     InfiniteHorizontalBookScroll(
                         books = filteredReadBooks,
                         showProgress = false,
@@ -415,7 +465,8 @@ fun LibraryScreen(
                         onMarkCompleted = onMarkCompleted,
                         onMoveToPlanToRead = onMoveToPlanToRead,
                         onSetProgress = onSetProgress,
-                        onEditTags = onEditTags
+                        onEditTags = onEditTags,
+                        onUpdateBookSettings = updateBookInLists
                     )
                 }
             }

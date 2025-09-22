@@ -17,6 +17,8 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.Serializable
 import java.io.File
 import java.util.*
+import android.util.Log
+import com.bsikar.helix.utils.FileUtils
 
 @Serializable
 data class WatchedDirectory(
@@ -25,14 +27,18 @@ data class WatchedDirectory(
     val lastScanned: Long = System.currentTimeMillis(),
     val recursive: Boolean = true,
     val totalBooks: Int = 0,
-    val isUri: Boolean = uri != null // Flag to know which type to use
+    val isUri: Boolean = uri != null, // Flag to know which type to use
+    val requiresRescan: Boolean = false // Flag to indicate if directory needs to be scanned
 )
 
 @Serializable 
 data class ImportedFile(
     val path: String,
+    val originalPath: String? = null, // Store original URI/path for directory imports
     val importedAt: Long = System.currentTimeMillis(),
-    val bookId: String? = null
+    val bookId: String? = null,
+    val sourceType: String = "individual", // "individual", "directory", "rescan"
+    val sourceUri: String? = null // Store the directory URI if from directory import
 )
 
 class LibraryManager(
@@ -116,26 +122,211 @@ class LibraryManager(
         }
     }
     
+    suspend fun importEpubFileForRescan(file: File, directoryPath: String): Result<Book> = withContext(Dispatchers.IO) {
+        try {
+            val epubResult = epubParser.parseEpubMetadataOnly(file)
+            if (epubResult.isFailure) {
+                return@withContext Result.failure(epubResult.exceptionOrNull() ?: Exception("Failed to parse EPUB"))
+            }
+            
+            val parsedEpub = epubResult.getOrThrow()
+            val bookId = UUID.randomUUID().toString()
+            
+            val book = Book(
+                id = bookId,
+                title = parsedEpub.metadata.title,
+                author = parsedEpub.metadata.author ?: "Unknown Author",
+                coverColor = generateCoverColor(parsedEpub.metadata.title, file.absolutePath),
+                filePath = file.absolutePath, // This is the direct file path for rescan
+                originalUri = null, // No URI for file-based rescans
+                backupFilePath = null, // No backup needed for direct file access
+                fileSize = file.length(),
+                totalChapters = parsedEpub.chapterCount,
+                description = parsedEpub.metadata.description,
+                publisher = parsedEpub.metadata.publisher,
+                language = parsedEpub.metadata.language,
+                isbn = parsedEpub.metadata.isbn,
+                publishedDate = parsedEpub.metadata.publishedDate,
+                coverImagePath = parsedEpub.coverImagePath,
+                isImported = true,
+                tags = emptyList(),
+                originalMetadataTags = parsedEpub.metadata.subjects
+            )
+            
+            // Track this as a rescan import from a watched directory
+            val importedFile = ImportedFile(
+                path = file.absolutePath,
+                originalPath = file.absolutePath, // For rescans, original path is the file path
+                importedAt = System.currentTimeMillis(),
+                bookId = bookId,
+                sourceType = "rescan", // Mark as rescan import
+                sourceUri = directoryPath // Store the watched directory path
+            )
+            
+            val updatedBooks = _books.value.toMutableList()
+            updatedBooks.add(book)
+            _books.value = updatedBooks
+            
+            val updatedImportedFiles = _importedFiles.value.toMutableList()
+            updatedImportedFiles.add(importedFile)
+            _importedFiles.value = updatedImportedFiles
+            
+            Result.success(book)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun importEpubFromUri(parsedEpub: ParsedEpub, originalUri: String, directoryUri: String, needsBackupCopy: Boolean = false): Result<Book> = withContext(Dispatchers.IO) {
+        try {
+            val bookId = UUID.randomUUID().toString()
+            
+            // Calculate checksum for file change detection
+            val fileChecksum = FileUtils.calculateFastChecksum(context, originalUri)
+            Log.d("LibraryManager", "Calculated checksum for ${parsedEpub.metadata.title}: $fileChecksum")
+            
+            // Never create backup copies - use URI-only access for better performance and storage
+            val backupFilePath: String? = null
+            
+            val book = Book(
+                id = bookId,
+                title = parsedEpub.metadata.title,
+                author = parsedEpub.metadata.author ?: "Unknown Author",
+                coverColor = generateCoverColor(parsedEpub.metadata.title, backupFilePath ?: originalUri),
+                filePath = null, // No direct file path for URI-based imports
+                originalUri = originalUri, // Store the original URI
+                backupFilePath = backupFilePath, // Store backup path if created
+                fileSize = backupFilePath?.let { File(it).length() } ?: 0L,
+                totalChapters = parsedEpub.chapterCount,
+                description = parsedEpub.metadata.description,
+                publisher = parsedEpub.metadata.publisher,
+                language = parsedEpub.metadata.language,
+                isbn = parsedEpub.metadata.isbn,
+                publishedDate = parsedEpub.metadata.publishedDate,
+                coverImagePath = parsedEpub.coverImagePath,
+                isImported = true,
+                tags = emptyList(),
+                originalMetadataTags = parsedEpub.metadata.subjects,
+                fileChecksum = fileChecksum,
+                userEditedMetadata = false
+            )
+            
+            // Add to library
+            val updatedBooks = _books.value.toMutableList()
+            updatedBooks.add(book)
+            _books.value = updatedBooks
+            
+            // Track imported file - use URI for path since no backup file exists
+            val updatedImportedFiles = _importedFiles.value.toMutableList()
+            updatedImportedFiles.add(ImportedFile(
+                path = originalUri, // Use URI as path since no backup file
+                originalPath = originalUri,
+                importedAt = System.currentTimeMillis(),
+                bookId = book.id,
+                sourceType = "directory",
+                sourceUri = directoryUri
+            ))
+            _importedFiles.value = updatedImportedFiles
+            
+            Result.success(book)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun importEpubFileForDirectory(file: File, originalUri: String, directoryUri: String): Result<Book> = withContext(Dispatchers.IO) {
+        try {
+            val epubResult = epubParser.parseEpubMetadataOnly(file)
+            if (epubResult.isFailure) {
+                return@withContext Result.failure(epubResult.exceptionOrNull() ?: Exception("Failed to parse EPUB"))
+            }
+            
+            val parsedEpub = epubResult.getOrThrow()
+            val bookId = UUID.randomUUID().toString()
+            
+            val book = Book(
+                id = bookId,
+                title = parsedEpub.metadata.title,
+                author = parsedEpub.metadata.author ?: "Unknown Author",
+                coverColor = generateCoverColor(parsedEpub.metadata.title, file.absolutePath),
+                filePath = file.absolutePath, // This is the backup file path for directory imports
+                originalUri = originalUri, // Store the original URI
+                backupFilePath = file.absolutePath, // Same as filePath for this case  
+                fileSize = file.length(),
+                totalChapters = parsedEpub.chapterCount,
+                description = parsedEpub.metadata.description,
+                publisher = parsedEpub.metadata.publisher,
+                language = parsedEpub.metadata.language,
+                isbn = parsedEpub.metadata.isbn,
+                publishedDate = parsedEpub.metadata.publishedDate,
+                coverImagePath = parsedEpub.coverImagePath,
+                isImported = true,
+                tags = emptyList(),
+                originalMetadataTags = parsedEpub.metadata.subjects
+            )
+            
+            // Track this as a directory import with proper source information
+            val importedFile = ImportedFile(
+                path = file.absolutePath,
+                originalPath = originalUri, // Store the original DocumentFile URI
+                importedAt = System.currentTimeMillis(),
+                bookId = bookId,
+                sourceType = "directory",
+                sourceUri = directoryUri // Store the directory URI
+            )
+            
+            val updatedBooks = _books.value.toMutableList()
+            updatedBooks.add(book)
+            _books.value = updatedBooks
+            
+            val updatedImportedFiles = _importedFiles.value.toMutableList()
+            updatedImportedFiles.add(importedFile)
+            _importedFiles.value = updatedImportedFiles
+            
+            Result.success(book)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun importEpubFile(file: File): Result<Book> = withContext(Dispatchers.IO) {
         try {
             _isLoading.value = true
             
-            val parseResult = epubParser.parseEpub(file)
+            val parseResult = epubParser.parseEpubMetadataOnly(file)
             if (parseResult.isFailure) {
                 return@withContext Result.failure(parseResult.exceptionOrNull() ?: Exception("Failed to parse EPUB"))
             }
             
             val parsedEpub = parseResult.getOrThrow()
+            val bookId = UUID.randomUUID().toString()
+            
+            // For direct imports from temporary files, create a permanent copy
+            val permanentFilePath = if (file.parent == context.cacheDir.absolutePath) {
+                // This is a temporary file, create a permanent copy
+                val epubDir = File(context.filesDir, "epubs")
+                if (!epubDir.exists()) {
+                    epubDir.mkdirs()
+                }
+                val permanentFile = File(epubDir, "direct_import_$bookId.epub")
+                file.copyTo(permanentFile, overwrite = true)
+                permanentFile.absolutePath
+            } else {
+                // This is already a permanent file path
+                file.absolutePath
+            }
             
             // Create Book from parsed EPUB
             val book = Book(
-                id = UUID.randomUUID().toString(),
+                id = bookId,
                 title = parsedEpub.metadata.title,
                 author = parsedEpub.metadata.author ?: "Unknown Author",
-                coverColor = generateCoverColor(parsedEpub.metadata.title),
-                filePath = file.absolutePath,
+                coverColor = generateCoverColor(parsedEpub.metadata.title, file.absolutePath),
+                filePath = permanentFilePath, // Use permanent file path
+                originalUri = null, // No URI for direct file imports
+                backupFilePath = null, // No backup needed - we have direct access
                 fileSize = file.length(),
-                totalChapters = parsedEpub.totalChapters,
+                totalChapters = parsedEpub.chapterCount,
                 description = parsedEpub.metadata.description,
                 publisher = parsedEpub.metadata.publisher,
                 language = parsedEpub.metadata.language,
@@ -151,12 +342,15 @@ class LibraryManager(
             updatedBooks.add(book)
             _books.value = updatedBooks
             
-            // Track imported file
+            // Track imported file as individual import
             val updatedImportedFiles = _importedFiles.value.toMutableList()
             updatedImportedFiles.add(ImportedFile(
-                path = file.absolutePath,
+                path = permanentFilePath,
+                originalPath = file.absolutePath, // Store original temp path for reference
                 importedAt = System.currentTimeMillis(),
-                bookId = book.id
+                bookId = book.id,
+                sourceType = "individual", // Mark as individual import
+                sourceUri = null // No directory URI for individual imports
             ))
             _importedFiles.value = updatedImportedFiles
             
@@ -180,13 +374,13 @@ class LibraryManager(
             
             epubFiles.forEachIndexed { index, file ->
                 // Step 1: Starting file processing (0% of this file's progress)
-                _importProgress.value = ImportProgress(index, epubFiles.size, "Starting ${file.name}", 0.0f)
+                _importProgress.value = ImportProgress(index + 1, epubFiles.size, "Starting ${file.name}", 0.0f)
                 
                 // Step 2: Parsing EPUB (33% of this file's progress)
-                _importProgress.value = ImportProgress(index, epubFiles.size, "Parsing ${file.name}", 0.33f)
+                _importProgress.value = ImportProgress(index + 1, epubFiles.size, "Parsing ${file.name}", 0.33f)
                 
                 // Step 3: Processing content (66% of this file's progress)
-                _importProgress.value = ImportProgress(index, epubFiles.size, "Processing ${file.name}", 0.66f)
+                _importProgress.value = ImportProgress(index + 1, epubFiles.size, "Processing ${file.name}", 0.66f)
                 
                 val result = importEpubFile(file)
                 if (result.isSuccess) {
@@ -194,7 +388,7 @@ class LibraryManager(
                 }
                 
                 // Step 4: Completed file (100% of this file's progress)
-                _importProgress.value = ImportProgress(index, epubFiles.size, "Completed ${file.name}", 1.0f)
+                _importProgress.value = ImportProgress(index + 1, epubFiles.size, "Completed ${file.name}", 1.0f)
             }
             
             // Add/update watched directory
@@ -227,19 +421,31 @@ class LibraryManager(
     
     suspend fun importEpubsFromDirectory(directoryUri: String, context: Context): Result<Int> = withContext(Dispatchers.IO) {
         try {
+            Log.d("LibraryManager", "Starting directory import from: $directoryUri")
             _isLoading.value = true
             val uri = Uri.parse(directoryUri)
             val documentFile = DocumentFile.fromTreeUri(context, uri)
             
             if (documentFile == null || !documentFile.isDirectory) {
+                Log.e("LibraryManager", "Invalid directory: documentFile=$documentFile, isDirectory=${documentFile?.isDirectory}")
                 return@withContext Result.failure(Exception("Invalid directory"))
             }
             
+            Log.d("LibraryManager", "Found directory: ${documentFile.name}")
             val epubFiles = findEpubFilesFromDocumentFile(documentFile)
+            Log.d("LibraryManager", "Found ${epubFiles.size} EPUB files in directory")
             
-            // Filter out files that are already imported (duplicate detection)
+            // Don't show progress if no files found
+            if (epubFiles.isEmpty()) {
+                _importProgress.value = null
+                return@withContext Result.success(0)
+            }
+            
+            // Log existing library state  
+            Log.d("LibraryManager", "Current library has ${_books.value.size} books")
             val existingFilePaths = _books.value.mapNotNull { it.filePath }.toSet()
             val existingTitles = _books.value.map { "${it.title}:${it.author}" }.toSet()
+            Log.d("LibraryManager", "Existing file paths: ${existingFilePaths.size}, existing titles: ${existingTitles.size}")
             
             val newFiles = epubFiles.filter { docFile ->
                 // For URIs, we can't easily check filePath, so we'll check during import
@@ -250,8 +456,17 @@ class LibraryManager(
             
             var importedCount = 0
             var skippedCount = 0
+            var failedCount = 0
+            val successfullyImportedBooks = mutableListOf<Book>()
+            
             epubFiles.forEachIndexed { index, docFile ->
+                // Check if job was cancelled
+                if (currentImportJob?.isCancelled == true) {
+                    throw Exception("Import cancelled by user")
+                }
+                
                 val fileName = docFile.name ?: "Unknown file"
+                Log.d("LibraryManager", "Processing file ${index + 1}/${epubFiles.size}: $fileName (${docFile.length()} bytes)")
                 
                 try {
                     // 25 granular steps per file for smooth progress
@@ -267,75 +482,117 @@ class LibraryManager(
                         0.96f to "Finishing", 1.0f to "Completed"
                     )
                     
-                    // File copying with progress updates
-                    val tempFile = File(context.cacheDir, "temp_epub_${System.currentTimeMillis()}.epub")
+                    // Optimized import: Parse directly from URI without copying files
+                    _importProgress.value = ImportProgress(index + 1, epubFiles.size, "Parsing $fileName", 0.2f)
                     
-                    steps.take(6).forEach { (progress, status) ->
-                        _importProgress.value = ImportProgress(index, epubFiles.size, "$status $fileName", progress)
-                        kotlinx.coroutines.delay(10) // Small delay for smooth animation
+                    // Parse directly from URI without copying - this is much faster!
+                    var parsedEpub: ParsedEpub? = null
+                    
+                    try {
+                        Log.d("LibraryManager", "Opening input stream for $fileName")
+                        context.contentResolver.openInputStream(docFile.uri)?.use { inputStream ->
+                            // Use streaming parser to avoid copying huge files
+                            val fileSize = docFile.length()
+                            Log.d("LibraryManager", "Parsing EPUB metadata for $fileName (${fileSize} bytes)")
+                            val parseResult = epubParser.parseEpubMetadataFromStream(inputStream, fileSize, fileName)
+                            
+                            if (parseResult.isSuccess) {
+                                parsedEpub = parseResult.getOrThrow()
+                                Log.d("LibraryManager", "Successfully parsed $fileName: ${parsedEpub?.metadata?.title}")
+                                _importProgress.value = ImportProgress(index + 1, epubFiles.size, "Processing $fileName", 0.6f)
+                            } else {
+                                val error = parseResult.exceptionOrNull()
+                                Log.e("LibraryManager", "Failed to parse $fileName: ${error?.message}", error)
+                                throw error ?: Exception("Parse failed")
+                            }
+                        } ?: throw Exception("Could not open input stream")
+                    } catch (e: Exception) {
+                        // If parsing fails, skip this file instead of copying
+                        Log.e("LibraryManager", "Failed to process $fileName: ${e.message}", e)
+                        failedCount++
+                        _importProgress.value = ImportProgress(index + 1, epubFiles.size, "Failed to parse: $fileName", 1.0f)
+                        return@forEachIndexed
                     }
                     
-                    context.contentResolver.openInputStream(docFile.uri)?.use { input ->
-                        tempFile.outputStream().use { output ->
-                            input.copyTo(output)
-                        }
+                    val result = if (parsedEpub != null) {
+                        // Successfully parsed from URI - create book with URI reference only
+                        _importProgress.value = ImportProgress(index + 1, epubFiles.size, "Adding $fileName", 0.8f)
+                        importEpubFromUri(parsedEpub!!, docFile.uri.toString(), directoryUri, false) // Never copy
+                    } else {
+                        // This should never happen now since we return early on parse failure
+                        Result.failure(Exception("Parsing failed"))
                     }
-                    
-                    // EPUB processing with progress updates
-                    steps.drop(6).take(13).forEach { (progress, status) ->
-                        _importProgress.value = ImportProgress(index, epubFiles.size, "$status $fileName", progress)
-                        kotlinx.coroutines.delay(10)
-                    }
-                    
-                    val result = importEpubFile(tempFile)
                     
                     if (result.isSuccess) {
                         val book = result.getOrThrow()
-                        val bookKey = "${book.title}:${book.author}"
+                        Log.d("LibraryManager", "Created book object: ${book.title} by ${book.author}")
                         
-                        // Check for duplicates before adding
-                        if (bookKey in existingTitles) {
+                        // Check for duplicates - use original URI for URI-based books
+                        val isDuplicate = _books.value.any { existingBook ->
+                            existingBook.title == book.title && 
+                            existingBook.author == book.author &&
+                            (existingBook.originalUri == book.originalUri || 
+                             (existingBook.filePath != null && book.filePath != null && existingBook.filePath == book.filePath))
+                        }
+                        
+                        if (isDuplicate) {
+                            Log.d("LibraryManager", "Skipping duplicate: ${book.title}")
                             skippedCount++
-                            _importProgress.value = ImportProgress(index, epubFiles.size, "Skipped duplicate: $fileName", 0.95f)
+                            _importProgress.value = ImportProgress(index + 1, epubFiles.size, "Skipped duplicate: $fileName", 0.95f)
                         } else {
+                            Log.d("LibraryManager", "Adding new book: ${book.title}")
                             importedCount++
+                            successfullyImportedBooks.add(book)
                             
                             // Finalization with progress updates
-                            steps.drop(19).forEach { (progress, status) ->
-                                _importProgress.value = ImportProgress(index, epubFiles.size, "$status $fileName", progress)
-                                kotlinx.coroutines.delay(10)
-                            }
+                            _importProgress.value = ImportProgress(index + 1, epubFiles.size, "Completed $fileName", 1.0f)
                         }
                     } else {
                         // Finalization for failed imports
-                        _importProgress.value = ImportProgress(index, epubFiles.size, "Failed: $fileName", 1.0f)
+                        val error = result.exceptionOrNull()
+                        Log.e("LibraryManager", "Import failed for $fileName: ${error?.message}", error)
+                        failedCount++
+                        _importProgress.value = ImportProgress(index + 1, epubFiles.size, "Failed: $fileName", 1.0f)
                     }
                     
-                    tempFile.delete()
+                    // File was never copied, nothing to clean up!
                 } catch (e: Exception) {
-                    _importProgress.value = ImportProgress(index, epubFiles.size, "Failed: $fileName", 1.0f)
+                    if (e.message?.contains("cancelled") == true) {
+                        throw e // Re-throw cancellation
+                    }
+                    _importProgress.value = ImportProgress(index + 1, epubFiles.size, "Failed: $fileName", 1.0f)
                 }
             }
             
-            // Add watched directory (check for duplicates)
-            val updatedWatchedDirs = _watchedDirectories.value.toMutableList()
-            val existingDirIndex = updatedWatchedDirs.indexOfFirst { it.uri == directoryUri }
-            
-            val watchedDir = WatchedDirectory(
-                path = documentFile?.name ?: "Unknown Directory",
-                uri = directoryUri,
-                lastScanned = System.currentTimeMillis(),
-                recursive = true,
-                totalBooks = importedCount,
-                isUri = true
-            )
-            
-            if (existingDirIndex >= 0) {
-                updatedWatchedDirs[existingDirIndex] = watchedDir
-            } else {
-                updatedWatchedDirs.add(watchedDir)
+            // Only add to watched directories if import completed successfully (not cancelled)
+            if (currentImportJob?.isActive == true || currentImportJob == null) {
+                val updatedWatchedDirs = _watchedDirectories.value.toMutableList()
+                val existingDirIndex = updatedWatchedDirs.indexOfFirst { it.uri == directoryUri }
+                
+                val watchedDir = WatchedDirectory(
+                    path = documentFile?.name ?: "Unknown Directory",
+                    uri = directoryUri,
+                    lastScanned = System.currentTimeMillis(),
+                    recursive = true,
+                    totalBooks = importedCount,
+                    isUri = true
+                )
+                
+                if (existingDirIndex >= 0) {
+                    updatedWatchedDirs[existingDirIndex] = watchedDir
+                } else {
+                    updatedWatchedDirs.add(watchedDir)
+                }
+                _watchedDirectories.value = updatedWatchedDirs
             }
-            _watchedDirectories.value = updatedWatchedDirs
+            
+            // Log final results
+            Log.d("LibraryManager", "Import completed: $importedCount imported, $skippedCount skipped, $failedCount failed")
+            Log.d("LibraryManager", "Library now has ${_books.value.size} books total")
+            
+            // Save the library to persist the imported books
+            saveLibrary()
+            Log.d("LibraryManager", "Library saved to preferences")
             
             _importProgress.value = null
             Result.success(importedCount)
@@ -382,14 +639,36 @@ class LibraryManager(
         return epubFiles
     }
     
-    private fun generateCoverColor(title: String): Long {
+    private fun generateCoverColor(title: String, filePath: String? = null): Long {
+        // Expanded color palette with more vibrant and diverse colors
         val colors = listOf(
-            Color(0xFF6B73FF), Color(0xFF9B59B6), Color(0xFF3498DB),
-            Color(0xFF1ABC9C), Color(0xFF2ECC71), Color(0xFFF39C12),
-            Color(0xFFE74C3C), Color(0xFF34495E), Color(0xFFE67E22)
+            // Blues
+            Color(0xFF6B73FF), Color(0xFF3498DB), Color(0xFF1E88E5), Color(0xFF039BE5), Color(0xFF00ACC1),
+            // Purples and Pinks
+            Color(0xFF9B59B6), Color(0xFF8E24AA), Color(0xFFD81B60), Color(0xFFEC4899), Color(0xFFE91E63),
+            // Greens
+            Color(0xFF1ABC9C), Color(0xFF2ECC71), Color(0xFF43A047), Color(0xFF00C853), Color(0xFF4CAF50),
+            // Oranges and Reds
+            Color(0xFFF39C12), Color(0xFFE67E22), Color(0xFFFF6347), Color(0xFFE74C3C), Color(0xFFFF5722),
+            // Yellows and Golds
+            Color(0xFFFFD700), Color(0xFFFFC107), Color(0xFFFF9800), Color(0xFFF57F17), Color(0xFFFFB300),
+            // Teals and Cyans
+            Color(0xFF319795), Color(0xFF4FD1C7), Color(0xFF26A69A), Color(0xFF00BCD4), Color(0xFF00E5FF),
+            // Browns and Earthy
+            Color(0xFF744210), Color(0xFF8D6E63), Color(0xFF5D4037), Color(0xFFA1887F), Color(0xFF6D4C41),
+            // Grays and Neutrals
+            Color(0xFF34495E), Color(0xFF607D8B), Color(0xFF546E7A), Color(0xFF90A4AE), Color(0xFF718096),
+            // Additional vibrant colors
+            Color(0xFF9C27B0), Color(0xFF673AB7), Color(0xFF3F51B5), Color(0xFF009688), Color(0xFF795548)
         )
         
-        val hash = title.hashCode()
+        // Use file name for more consistent hashing, fallback to title
+        val hashInput = filePath?.let { 
+            java.io.File(it).nameWithoutExtension 
+        } ?: title
+        
+        // Use a more robust hashing approach
+        val hash = hashInput.hashCode()
         val colorIndex = kotlin.math.abs(hash) % colors.size
         return colors[colorIndex].value.toLong()
     }
@@ -430,6 +709,43 @@ class LibraryManager(
         scope.launch { saveLibrary() }
     }
     
+    fun updateBookSettings(updatedBook: Book) {
+        val updatedBooks = _books.value.map { book ->
+            if (book.id == updatedBook.id) {
+                updatedBook
+            } else {
+                book
+            }
+        }
+        
+        _books.value = updatedBooks
+        scope.launch { saveLibrary() }
+    }
+    
+    fun updateBookMetadata(bookId: String, metadataUpdate: com.bsikar.helix.ui.components.BookMetadataUpdate) {
+        val updatedBooks = _books.value.map { book ->
+            if (book.id == bookId) {
+                book.copy(
+                    title = metadataUpdate.title,
+                    author = metadataUpdate.author,
+                    description = metadataUpdate.description,
+                    publisher = metadataUpdate.publisher,
+                    language = metadataUpdate.language,
+                    isbn = metadataUpdate.isbn,
+                    publishedDate = metadataUpdate.publishedDate,
+                    coverDisplayMode = metadataUpdate.coverDisplayMode,
+                    userSelectedColor = metadataUpdate.userSelectedColor?.value?.toLong(),
+                    userEditedMetadata = true // Mark that user has edited metadata
+                )
+            } else {
+                book
+            }
+        }
+        
+        _books.value = updatedBooks
+        scope.launch { saveLibrary() }
+    }
+    
     fun removeBook(bookId: String) {
         val updatedBooks = _books.value.filter { it.id != bookId }
         _books.value = updatedBooks
@@ -441,264 +757,101 @@ class LibraryManager(
     }
     
     suspend fun getEpubContent(book: Book): ParsedEpub? {
-        if (!book.isImported || book.filePath == null) return null
+        if (!book.isImported) {
+            Log.d("LibraryManager", "Book ${book.title} is not imported, skipping EPUB loading")
+            return null
+        }
+        
+        Log.d("LibraryManager", "Loading EPUB content for book: ${book.title}")
+        Log.d("LibraryManager", "Book filePath: ${book.filePath}")
+        Log.d("LibraryManager", "Book originalUri: ${book.originalUri}")
+        Log.d("LibraryManager", "Book backupFilePath: ${book.backupFilePath}")
         
         return try {
-            val file = File(book.filePath)
-            if (file.exists()) {
-                epubParser.parseEpub(file).getOrNull()
-            } else {
-                null
+            // Strategy 1: Try original file path first (for direct file imports)
+            book.filePath?.let { filePath ->
+                Log.d("LibraryManager", "Trying Strategy 1: file path $filePath")
+                val file = File(filePath)
+                if (file.exists()) {
+                    Log.d("LibraryManager", "File exists, parsing...")
+                    val result = epubParser.parseEpub(file).getOrNull()
+                    if (result != null) {
+                        Log.d("LibraryManager", "Strategy 1 successful")
+                        return result
+                    } else {
+                        Log.w("LibraryManager", "Strategy 1 failed: parseEpub returned null")
+                    }
+                } else {
+                    Log.w("LibraryManager", "Strategy 1 failed: file does not exist")
+                }
             }
+            
+            // Strategy 2: Try original URI (for SAF-based imports) - use new efficient parser
+            book.originalUri?.let { uriString ->
+                Log.d("LibraryManager", "Trying Strategy 2: URI $uriString")
+                try {
+                    val result = epubParser.parseEpubFromUri(context, uriString)
+                    if (result.isSuccess) {
+                        Log.d("LibraryManager", "Strategy 2 successful")
+                        return result.getOrNull()
+                    } else {
+                        Log.w("LibraryManager", "Strategy 2 failed: ${result.exceptionOrNull()?.message}")
+                    }
+                } catch (e: Exception) {
+                    Log.e("LibraryManager", "Strategy 2 exception: ${e.message}", e)
+                    // URI might be invalid or permissions revoked, continue to next strategy
+                }
+            }
+            
+            // Strategy 3: Try backup file path (copied files) - fallback for old imports
+            book.backupFilePath?.let { backupPath ->
+                Log.d("LibraryManager", "Trying Strategy 3: backup path $backupPath")
+                val backupFile = File(backupPath)
+                if (backupFile.exists()) {
+                    Log.d("LibraryManager", "Backup file exists, parsing...")
+                    val result = epubParser.parseEpub(backupFile).getOrNull()
+                    if (result != null) {
+                        Log.d("LibraryManager", "Strategy 3 successful")
+                        return result
+                    } else {
+                        Log.w("LibraryManager", "Strategy 3 failed: parseEpub returned null")
+                    }
+                } else {
+                    Log.w("LibraryManager", "Strategy 3 failed: backup file does not exist")
+                }
+            }
+            
+            // All strategies failed
+            Log.e("LibraryManager", "All strategies failed for book: ${book.title}")
+            null
         } catch (e: Exception) {
+            Log.e("LibraryManager", "Exception in getEpubContent for book ${book.title}: ${e.message}", e)
             e.printStackTrace()
             null
         }
     }
     
-    fun addFakeData() {
-        val fakeBooks = listOf(
-            // Plan to Read Books (progress = 0) - Most books start here
-            Book(
-                title = "Akane-Banashi",
-                author = "Yuki Suenaga",
-                coverColor = 0xFF4169E1,
-                progress = 0f,
-                tags = listOf("shounen", "drama", "slice-of-life", "ongoing", "manga"),
-                originalMetadataTags = listOf("Shounen", "Drama", "Traditional Arts", "Rakugo"),
-                isImported = false
-            ),
-            Book(
-                title = "Dandadan",
-                author = "Yukinobu Tatsu",
-                coverColor = 0xFF32CD32,
-                progress = 0f,
-                tags = listOf("shounen", "supernatural", "comedy", "romance", "ongoing", "manga"),
-                originalMetadataTags = listOf("Supernatural", "Comedy", "School", "Aliens", "Ghosts"),
-                isImported = false
-            ),
-            Book(
-                title = "Jujutsu Kaisen",
-                author = "Gege Akutami",
-                coverColor = 0xFF8A2BE2,
-                progress = 0f,
-                tags = listOf("shounen", "action", "supernatural", "completed", "manga"),
-                originalMetadataTags = listOf("Supernatural", "School", "Action", "Curses"),
-                isImported = false
-            ),
-            Book(
-                title = "Tokyo Ghoul",
-                author = "Sui Ishida",
-                coverColor = 0xFF696969,
-                progress = 0f,
-                tags = listOf("seinen", "supernatural", "dark", "completed", "manga"),
-                originalMetadataTags = listOf("Dark Fantasy", "Supernatural", "Horror", "Tragedy"),
-                isImported = false
-            ),
-            Book(
-                title = "Monster",
-                author = "Naoki Urasawa",
-                coverColor = 0xFF8B0000,
-                progress = 0f,
-                tags = listOf("seinen", "thriller", "psychological", "completed", "manga"),
-                originalMetadataTags = listOf("Psychological", "Thriller", "Mystery", "Medical"),
-                isImported = false
-            ),
-            Book(
-                title = "20th Century Boys",
-                author = "Naoki Urasawa",
-                coverColor = 0xFF4682B4,
-                progress = 0f,
-                tags = listOf("seinen", "mystery", "thriller", "completed", "manga"),
-                originalMetadataTags = listOf("Mystery", "Sci-Fi", "Thriller", "Friendship"),
-                isImported = false
-            ),
-            Book(
-                title = "Pluto",
-                author = "Naoki Urasawa",
-                coverColor = 0xFF2F4F4F,
-                progress = 0f,
-                tags = listOf("seinen", "sci-fi", "mystery", "completed", "manga"),
-                originalMetadataTags = listOf("Sci-Fi", "Mystery", "Robots", "Philosophy"),
-                isImported = false
-            ),
-            
-            // Currently Reading Books (0 < progress < 1)
-            Book(
-                title = "Chainsaw Man",
-                author = "Tatsuki Fujimoto",
-                coverColor = 0xFFDC143C,
-                progress = 0.45f,
-                lastReadTimestamp = System.currentTimeMillis() - (2 * 24 * 60 * 60 * 1000), // 2 days ago
-                tags = listOf("shounen", "action", "supernatural", "ongoing", "manga"),
-                originalMetadataTags = listOf("Action", "Supernatural", "Gore", "Dark Comedy"),
-                isImported = false
-            ),
-            Book(
-                title = "One Piece",
-                author = "Eiichiro Oda",
-                coverColor = 0xFFFF6347,
-                progress = 0.72f,
-                lastReadTimestamp = System.currentTimeMillis() - (5 * 24 * 60 * 60 * 1000), // 5 days ago
-                tags = listOf("shounen", "adventure", "action", "ongoing", "manga"),
-                originalMetadataTags = listOf("Adventure", "Friendship", "Pirates", "Comedy"),
-                isImported = false
-            ),
-            Book(
-                title = "Berserk",
-                author = "Kentaro Miura",
-                coverColor = 0xFF800080,
-                progress = 0.38f,
-                lastReadTimestamp = System.currentTimeMillis() - (1 * 24 * 60 * 60 * 1000), // 1 day ago
-                tags = listOf("seinen", "dark-fantasy", "action", "ongoing", "manga"),
-                originalMetadataTags = listOf("Dark Fantasy", "Medieval", "Action", "Mature"),
-                isImported = false
-            ),
-            Book(
-                title = "Vagabond",
-                author = "Takehiko Inoue",
-                coverColor = 0xFF8B4513,
-                progress = 0.61f,
-                lastReadTimestamp = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000), // 1 week ago
-                tags = listOf("seinen", "historical", "action", "martial-arts", "hiatus", "manga"),
-                originalMetadataTags = listOf("Historical", "Samurai", "Martial Arts", "Philosophy"),
-                isImported = false
-            ),
-            Book(
-                title = "Attack on Titan",
-                author = "Hajime Isayama",
-                coverColor = 0xFF8FBC8F,
-                progress = 0.89f,
-                lastReadTimestamp = System.currentTimeMillis() - (3 * 24 * 60 * 60 * 1000), // 3 days ago
-                tags = listOf("shounen", "action", "drama", "completed", "manga"),
-                originalMetadataTags = listOf("Action", "Drama", "Military", "Titans"),
-                isImported = false
-            ),
-            
-            // Completed Books (progress = 1.0)
-            Book(
-                title = "Death Note",
-                author = "Tsugumi Ohba",
-                coverColor = 0xFF000000,
-                progress = 1.0f,
-                lastReadTimestamp = System.currentTimeMillis() - (14 * 24 * 60 * 60 * 1000), // 2 weeks ago
-                tags = listOf("shounen", "psychological", "thriller", "completed", "manga"),
-                originalMetadataTags = listOf("Psychological", "Supernatural", "Crime", "Justice"),
-                isImported = false
-            ),
-            Book(
-                title = "Fullmetal Alchemist",
-                author = "Hiromu Arakawa",
-                coverColor = 0xFFB8860B,
-                progress = 1.0f,
-                lastReadTimestamp = System.currentTimeMillis() - (30 * 24 * 60 * 60 * 1000), // 1 month ago
-                tags = listOf("shounen", "adventure", "action", "completed", "manga"),
-                originalMetadataTags = listOf("Adventure", "Military", "Alchemy", "Brotherhood"),
-                isImported = false
-            ),
-            Book(
-                title = "Hunter x Hunter",
-                author = "Yoshihiro Togashi",
-                coverColor = 0xFF228B22,
-                progress = 1.0f,
-                lastReadTimestamp = System.currentTimeMillis() - (21 * 24 * 60 * 60 * 1000), // 3 weeks ago
-                tags = listOf("shounen", "adventure", "action", "hiatus", "manga"),
-                originalMetadataTags = listOf("Adventure", "Supernatural", "Strategic", "Complex"),
-                isImported = false
-            ),
-            Book(
-                title = "Spirited Away",
-                author = "Hayao Miyazaki",
-                coverColor = 0xFF9370DB,
-                progress = 1.0f,
-                lastReadTimestamp = System.currentTimeMillis() - (45 * 24 * 60 * 60 * 1000), // 1.5 months ago
-                tags = listOf("family", "fantasy", "adventure", "completed", "manga"),
-                originalMetadataTags = listOf("Fantasy", "Family", "Magic", "Coming of Age"),
-                isImported = false
-            ),
-            Book(
-                title = "Your Name",
-                author = "Makoto Shinkai",
-                coverColor = 0xFFFF69B4,
-                progress = 1.0f,
-                lastReadTimestamp = System.currentTimeMillis() - (60 * 24 * 60 * 60 * 1000), // 2 months ago
-                tags = listOf("romance", "supernatural", "drama", "completed", "manga"),
-                originalMetadataTags = listOf("Romance", "Time Travel", "Drama", "Slice of Life"),
-                isImported = false
-            ),
-            Book(
-                title = "Akira",
-                author = "Katsuhiro Otomo",
-                coverColor = 0xFF483D8B,
-                progress = 1.0f,
-                lastReadTimestamp = System.currentTimeMillis() - (90 * 24 * 60 * 60 * 1000), // 3 months ago
-                tags = listOf("seinen", "sci-fi", "action", "completed", "manga"),
-                originalMetadataTags = listOf("Cyberpunk", "Post-Apocalyptic", "Psychic Powers", "Classic"),
-                isImported = false
-            ),
-            Book(
-                title = "Ghost in the Shell",
-                author = "Masamune Shirow",
-                coverColor = 0xFF708090,
-                progress = 1.0f,
-                lastReadTimestamp = System.currentTimeMillis() - (120 * 24 * 60 * 60 * 1000), // 4 months ago
-                tags = listOf("seinen", "sci-fi", "action", "completed", "manga"),
-                originalMetadataTags = listOf("Cyberpunk", "Philosophy", "AI", "Technology"),
-                isImported = false
-            ),
-            
-            // Additional popular titles to round out the collection
-            Book(
-                title = "Clockwork Planet",
-                author = "Yuu Kamiya",
-                coverColor = 0xFFFFD700,
-                progress = 0.3f,
-                lastReadTimestamp = System.currentTimeMillis() - (4 * 24 * 60 * 60 * 1000), // 4 days ago
-                tags = listOf("light-novel", "sci-fi", "action", "ongoing"),
-                originalMetadataTags = listOf("Science Fiction", "Clockwork", "Adventure"),
-                isImported = false
-            ),
-            Book(
-                title = "No Game No Life",
-                author = "Yuu Kamiya",
-                coverColor = 0xFF9B59B6,
-                progress = 0.7f,
-                lastReadTimestamp = System.currentTimeMillis() - (6 * 24 * 60 * 60 * 1000), // 6 days ago
-                tags = listOf("light-novel", "comedy", "fantasy", "ongoing"),
-                originalMetadataTags = listOf("Game", "Fantasy", "Comedy", "Isekai"),
-                isImported = false
-            ),
-            Book(
-                title = "Overlord",
-                author = "Kugane Maruyama",
-                coverColor = 0xFF34495E,
-                progress = 1.0f,
-                lastReadTimestamp = System.currentTimeMillis() - (15 * 24 * 60 * 60 * 1000), // 2+ weeks ago
-                tags = listOf("light-novel", "fantasy", "action", "completed"),
-                originalMetadataTags = listOf("Dark Fantasy", "Isekai", "RPG", "Undead"),
-                isImported = false
-            )
-        )
+    /**
+     * Get the physical file path for an EPUB book - needed for image rendering
+     */
+    fun getEpubFilePath(book: Book): String? {
+        // Strategy 1: Direct file path
+        book.filePath?.let { filePath ->
+            val file = File(filePath)
+            if (file.exists()) return filePath
+        }
         
-        val updatedBooks = _books.value.toMutableList()
-        updatedBooks.addAll(fakeBooks)
-        _books.value = updatedBooks
+        // Strategy 2: Backup file path  
+        book.backupFilePath?.let { backupPath ->
+            val file = File(backupPath)
+            if (file.exists()) return backupPath
+        }
         
-        scope.launch { saveLibrary() }
+        // Strategy 3: For URI-based books, we need to create a temp file when needed
+        // This will be handled by the image component on-demand
+        return null
     }
     
-    fun addFakeDataAsync(onComplete: (Boolean, String) -> Unit) {
-        currentImportJob?.cancel() // Cancel any existing import
-        currentImportJob = scope.launch {
-            try {
-                addFakeData()
-                onComplete(true, "Fake data imported successfully!")
-            } catch (e: Exception) {
-                onComplete(false, "Failed to import fake data: ${e.message}")
-            }
-            currentImportJob = null
-        }
-    }
     
     fun importEpubFileAsync(file: File, onComplete: (Boolean, String) -> Unit) {
         currentImportJob?.cancel() // Cancel any existing import
@@ -710,6 +863,47 @@ class LibraryManager(
                 onComplete(false, "Failed to import EPUB: ${result.exceptionOrNull()?.message}")
             }
             currentImportJob = null
+        }
+    }
+    
+    fun addDirectoryToWatchListAsync(directoryUri: String, context: Context, onComplete: (Boolean, String) -> Unit) {
+        scope.launch {
+            try {
+                val uri = Uri.parse(directoryUri)
+                val documentFile = DocumentFile.fromTreeUri(context, uri)
+                
+                if (documentFile == null || !documentFile.isDirectory) {
+                    onComplete(false, "Invalid directory selected")
+                    return@launch
+                }
+                
+                // Check if directory is already watched
+                val existingDir = _watchedDirectories.value.find { it.uri == directoryUri }
+                if (existingDir != null) {
+                    onComplete(false, "Directory is already being watched")
+                    return@launch
+                }
+                
+                // Add directory to watched list with requiresRescan = true
+                val updatedWatchedDirs = _watchedDirectories.value.toMutableList()
+                val watchedDir = WatchedDirectory(
+                    path = documentFile.name ?: "Unknown Directory",
+                    uri = directoryUri,
+                    lastScanned = 0L, // Never scanned yet
+                    recursive = true,
+                    totalBooks = 0,
+                    isUri = true,
+                    requiresRescan = true
+                )
+                
+                updatedWatchedDirs.add(watchedDir)
+                _watchedDirectories.value = updatedWatchedDirs
+                saveLibrary()
+                
+                onComplete(true, "Directory added to watch list. Rescan to import books.")
+            } catch (e: Exception) {
+                onComplete(false, "Failed to add directory: ${e.message}")
+            }
         }
     }
     
@@ -745,6 +939,50 @@ class LibraryManager(
         scope.launch { saveLibrary() }
     }
     
+    /**
+     * Clean up all copied EPUB files to free storage space
+     * This is safe to call since we now use URI-only access
+     */
+    suspend fun cleanupCopiedFiles(): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val epubDir = File(context.filesDir, "epubs")
+            var deletedCount = 0
+            var freedSpace = 0L
+            
+            if (epubDir.exists()) {
+                epubDir.listFiles()?.forEach { file ->
+                    if (file.isFile && file.name.endsWith(".epub")) {
+                        freedSpace += file.length()
+                        if (file.delete()) {
+                            deletedCount++
+                        }
+                    }
+                }
+                
+                // Remove the directory if it's empty
+                if (epubDir.listFiles()?.isEmpty() == true) {
+                    epubDir.delete()
+                }
+            }
+            
+            val freedSpaceMB = freedSpace / (1024 * 1024)
+            Result.success("Deleted $deletedCount copied files, freed ${freedSpaceMB}MB of storage")
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    fun cleanupCopiedFilesAsync(onComplete: (Boolean, String) -> Unit) {
+        scope.launch {
+            val result = cleanupCopiedFiles()
+            if (result.isSuccess) {
+                onComplete(true, result.getOrThrow())
+            } else {
+                onComplete(false, "Failed to cleanup files: ${result.exceptionOrNull()?.message}")
+            }
+        }
+    }
+    
     suspend fun rescanWatchedDirectories(): Result<List<Book>> = withContext(Dispatchers.IO) {
         try {
             _isLoading.value = true
@@ -755,38 +993,122 @@ class LibraryManager(
             _watchedDirectories.value.forEach { watchedDir ->
                 if (watchedDir.isUri && watchedDir.uri != null) {
                     // Handle URI-based directories
-                    _importProgress.value = ImportProgress(0, 0, "Scanning ${watchedDir.path}...")
-                    
                     val uri = Uri.parse(watchedDir.uri)
                     val documentFile = DocumentFile.fromTreeUri(context, uri)
                     
                     if (documentFile != null && documentFile.isDirectory) {
                         val epubFiles = findEpubFilesFromDocumentFile(documentFile)
                         
+                        // Don't show progress if no files to scan
+                        if (epubFiles.isEmpty()) {
+                            return@forEach
+                        }
+                        
+                        _importProgress.value = ImportProgress(0, epubFiles.size, "Scanning ${watchedDir.path}...")
+                        
                         epubFiles.forEachIndexed { index, docFile ->
                             val fileName = docFile.name ?: "Unknown file"
                             
                             try {
-                                _importProgress.value = ImportProgress(index, epubFiles.size, "Checking $fileName", index.toFloat() / epubFiles.size)
+                                val safeSubProgress = if (epubFiles.size > 0) index.toFloat() / epubFiles.size else 0f
+                                _importProgress.value = ImportProgress(index + 1, epubFiles.size, "Checking $fileName", safeSubProgress)
                                 
-                                val tempFile = File(context.cacheDir, "temp_rescan_${System.currentTimeMillis()}.epub")
-                                context.contentResolver.openInputStream(docFile.uri)?.use { input ->
-                                    tempFile.outputStream().use { output ->
-                                        input.copyTo(output)
+                                // Try to parse directly from URI first, only copy if needed for rescan
+                                var parsedEpub: ParsedEpub? = null
+                                var permanentFile: File? = null
+                                
+                                try {
+                                    context.contentResolver.openInputStream(docFile.uri)?.use { inputStream ->
+                                        // Use streaming parser for rescan to avoid copying huge files
+                                        val fileSize = docFile.length()
+                                        val parseResult = epubParser.parseEpubMetadataFromStream(inputStream, fileSize, fileName)
+                                        
+                                        if (parseResult.isSuccess) {
+                                            parsedEpub = parseResult.getOrThrow()
+                                        }
                                     }
+                                } catch (e: Exception) {
+                                    // Parsing from URI failed, we'll need to copy the file
                                 }
                                 
-                                val result = importEpubFile(tempFile)
-                                if (result.isSuccess) {
-                                    val book = result.getOrThrow()
-                                    val bookKey = "${book.title}:${book.author}"
+                                // If parsing from URI failed, skip this file instead of copying
+                                if (parsedEpub == null) {
+                                    // Skip files that can't be parsed from URI directly
+                                    return@forEachIndexed
+                                }
+                                parsedEpub?.let { epub ->
+                                    // Calculate checksum for this file
+                                    val fileChecksum = FileUtils.calculateFastChecksum(context, docFile.uri.toString())
+                                    Log.d("LibraryManager", "Rescan: Calculated checksum for ${epub.metadata.title}: $fileChecksum")
                                     
-                                    if (bookKey !in existingTitles) {
-                                        newBooks.add(book)
+                                    // Check if this book already exists based on checksum or URI
+                                    val existingBook = _books.value.find { existingBook ->
+                                        // First check by checksum if available
+                                        if (fileChecksum != null && existingBook.fileChecksum != null) {
+                                            existingBook.fileChecksum == fileChecksum
+                                        } else {
+                                            // Fallback to URI comparison for existing books without checksums
+                                            existingBook.originalUri == docFile.uri.toString()
+                                        }
+                                    }
+                                    
+                                    if (existingBook != null) {
+                                        Log.d("LibraryManager", "Found existing book: ${existingBook.title}")
+                                        
+                                        // Check if file has changed (different checksum)
+                                        if (fileChecksum != null && existingBook.fileChecksum != null && 
+                                            existingBook.fileChecksum != fileChecksum) {
+                                            Log.d("LibraryManager", "File changed, updating metadata for: ${existingBook.title}")
+                                            
+                                            // File has changed - update only if user hasn't edited metadata
+                                            if (!existingBook.userEditedMetadata) {
+                                                // Update with new metadata but preserve user data
+                                                val updatedBook = existingBook.copy(
+                                                    // Update technical metadata from file
+                                                    fileChecksum = fileChecksum,
+                                                    totalChapters = epub.chapterCount,
+                                                    coverImagePath = epub.coverImagePath,
+                                                    
+                                                    // Only update content metadata if user hasn't edited it
+                                                    description = epub.metadata.description ?: existingBook.description,
+                                                    publisher = epub.metadata.publisher ?: existingBook.publisher,
+                                                    language = epub.metadata.language ?: existingBook.language,
+                                                    isbn = epub.metadata.isbn ?: existingBook.isbn,
+                                                    publishedDate = epub.metadata.publishedDate ?: existingBook.publishedDate,
+                                                    
+                                                    // Update original metadata tags but preserve user tags
+                                                    originalMetadataTags = epub.metadata.subjects
+                                                )
+                                                
+                                                // Update the existing book in the library
+                                                val updatedBooks = _books.value.map { book ->
+                                                    if (book.id == existingBook.id) updatedBook else book
+                                                }
+                                                _books.value = updatedBooks
+                                                Log.d("LibraryManager", "Updated existing book: ${updatedBook.title}")
+                                            } else {
+                                                Log.d("LibraryManager", "User has edited metadata, preserving edits for: ${existingBook.title}")
+                                                // Just update the checksum to reflect file change
+                                                val updatedBook = existingBook.copy(fileChecksum = fileChecksum)
+                                                val updatedBooks = _books.value.map { book ->
+                                                    if (book.id == existingBook.id) updatedBook else book
+                                                }
+                                                _books.value = updatedBooks
+                                            }
+                                        } else {
+                                            Log.d("LibraryManager", "File unchanged, skipping: ${existingBook.title}")
+                                        }
+                                    } else {
+                                        Log.d("LibraryManager", "New book found, importing: ${epub.metadata.title}")
+                                        // This is a new book - import it
+                                        val result = importEpubFromUri(epub, docFile.uri.toString(), watchedDir.uri!!, false)
+                                        if (result.isSuccess) {
+                                            newBooks.add(result.getOrThrow())
+                                        }
                                     }
                                 }
                                 
-                                tempFile.delete()
+                                // No files copied during rescan, nothing to clean up
                             } catch (e: Exception) {
                                 // Continue with other files
                             }
@@ -796,31 +1118,51 @@ class LibraryManager(
                     // Handle file-based directories (legacy)
                     val directory = File(watchedDir.path)
                     if (directory.exists() && directory.isDirectory) {
-                        _importProgress.value = ImportProgress(0, 0, "Scanning ${directory.name}...")
-                        
                         val epubFiles = findEpubFiles(directory, watchedDir.recursive)
                         val newFiles = epubFiles.filter { it.absolutePath !in existingFilePaths }
                         
+                        // Don't show progress if no new files to scan
+                        if (newFiles.isEmpty()) {
+                            return@forEach
+                        }
+                        
+                        _importProgress.value = ImportProgress(0, newFiles.size, "Scanning ${directory.name}...")
+                        
                         newFiles.forEachIndexed { index, file ->
-                            _importProgress.value = ImportProgress(index, newFiles.size, "Importing ${file.name}", index.toFloat() / newFiles.size)
+                            val safeSubProgress = if (newFiles.size > 0) index.toFloat() / newFiles.size else 0f
+                            _importProgress.value = ImportProgress(index + 1, newFiles.size, "Importing ${file.name}", safeSubProgress)
                             
-                            val result = importEpubFile(file)
-                            if (result.isSuccess) {
-                                val book = result.getOrThrow()
-                                val bookKey = "${book.title}:${book.author}"
+                            // Check for duplicates BEFORE importing to prevent adding duplicates to library
+                            val parseResult = epubParser.parseEpubMetadataOnly(file)
+                            if (parseResult.isSuccess) {
+                                val parsedEpub = parseResult.getOrThrow()
                                 
-                                if (bookKey !in existingTitles) {
-                                    newBooks.add(book)
+                                // Check if this book already exists based on title + author + file path
+                                val isDuplicate = _books.value.any { existingBook ->
+                                    existingBook.title == parsedEpub.metadata.title && 
+                                    existingBook.author == (parsedEpub.metadata.author ?: "Unknown Author")
+                                } || _importedFiles.value.any { importedFile ->
+                                    importedFile.originalPath == file.absolutePath
+                                }
+                                
+                                if (!isDuplicate) {
+                                    val result = importEpubFileForRescan(file, watchedDir.path)
+                                    if (result.isSuccess) {
+                                        newBooks.add(result.getOrThrow())
+                                    }
                                 }
                             }
                         }
                     }
                 }
                 
-                // Update last scanned time
+                // Update last scanned time and clear requiresRescan flag
                 val updatedWatchedDirs = _watchedDirectories.value.map { dir ->
                     if (dir.path == watchedDir.path && dir.uri == watchedDir.uri) {
-                        dir.copy(lastScanned = System.currentTimeMillis())
+                        dir.copy(
+                            lastScanned = System.currentTimeMillis(),
+                            requiresRescan = false
+                        )
                     } else {
                         dir
                     }
@@ -845,6 +1187,34 @@ class LibraryManager(
         scope.launch { saveLibrary() }
     }
     
+    fun resetPartiallyImportedDirectory(directoryUri: String) {
+        // Remove all books that were imported from this directory
+        val booksToRemove = _books.value.filter { book ->
+            _importedFiles.value.any { importedFile ->
+                importedFile.bookId == book.id && 
+                (importedFile.sourceUri == directoryUri || importedFile.sourceType == "directory" && importedFile.sourceUri == directoryUri)
+            }
+        }
+        
+        // Remove the books
+        val updatedBooks = _books.value.filter { book ->
+            booksToRemove.none { it.id == book.id }
+        }
+        _books.value = updatedBooks
+        
+        // Remove the imported file records
+        val updatedImportedFiles = _importedFiles.value.filter { importedFile ->
+            !(importedFile.sourceUri == directoryUri && importedFile.sourceType == "directory")
+        }
+        _importedFiles.value = updatedImportedFiles
+        
+        // Remove the watched directory
+        val updatedWatchedDirs = _watchedDirectories.value.filter { it.uri != directoryUri }
+        _watchedDirectories.value = updatedWatchedDirs
+        
+        scope.launch { saveLibrary() }
+    }
+    
     fun rescanWatchedDirectoriesAsync(onComplete: (Boolean, String, Int) -> Unit) {
         currentImportJob?.cancel() // Cancel any existing import
         currentImportJob = scope.launch {
@@ -866,10 +1236,14 @@ data class ImportProgress(
     val currentFile: String,
     val subProgress: Float = 0f // 0.0 to 1.0 for within-file progress
 ) {
-    val percentage: Int get() = if (total > 0) {
-        val fileProgress = current.toFloat() / total
-        val totalProgress = fileProgress + (subProgress / total)
+    val percentage: Int get() = if (total > 0 && current >= 0) {
+        val fileProgress = current.toFloat() / total.toFloat()
+        val totalProgress = fileProgress + (subProgress / total.toFloat())
         (totalProgress * 100).toInt().coerceIn(0, 100)
     } else 0
     val isComplete: Boolean get() = current >= total && subProgress >= 1f
+    
+    // Safer display values that handle edge cases
+    val displayCurrent: Int get() = if (total > 0) current.coerceIn(0, total) else 0
+    val displayTotal: Int get() = total.coerceAtLeast(0)
 }

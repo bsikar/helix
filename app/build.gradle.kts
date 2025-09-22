@@ -81,6 +81,9 @@ dependencies {
     // System UI Controller for status bar styling
     implementation("com.google.accompanist:accompanist-systemuicontroller:0.32.0")
     
+    // Image loading library for EPUB images
+    implementation("io.coil-kt:coil-compose:2.4.0")
+    
     // EPUB parsing - using a lightweight ZIP library + XML parsing
     implementation("net.lingala.zip4j:zip4j:2.11.5")
     implementation("org.jsoup:jsoup:1.16.1") // For HTML parsing

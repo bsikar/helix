@@ -13,6 +13,13 @@ enum class ReadingStatus {
 }
 
 @Serializable
+enum class CoverDisplayMode {
+    AUTO, // Use cover art if available, fallback to color
+    COLOR_ONLY, // Always use color
+    COVER_ART_ONLY // Use cover art if available, otherwise show placeholder
+}
+
+@Serializable
 data class Book(
     val id: String = UUID.randomUUID().toString(),
     val title: String,
@@ -24,12 +31,14 @@ data class Book(
     val currentChapter: Int = 1,
     val currentPage: Int = 1,
     val scrollPosition: Int = 0,
-    val totalPages: Int = 150,
+    val totalPages: Int = 0, // Will be set based on actual chapters, no fake defaults
     val tags: List<String> = emptyList(), // List of tag IDs
     val originalMetadataTags: List<String> = emptyList(), // Original metadata tags for reference
     
     // EPUB-specific fields
-    val filePath: String? = null, // Path to EPUB file
+    val filePath: String? = null, // Primary path to EPUB file (original location when possible)
+    val originalUri: String? = null, // Original URI for SAF-based imports (content://)
+    val backupFilePath: String? = null, // Backup copy in app storage (if needed)
     val fileSize: Long = 0L,
     val totalChapters: Int = 1,
     val description: String? = null,
@@ -38,11 +47,69 @@ data class Book(
     val isbn: String? = null,
     val publishedDate: String? = null,
     val coverImagePath: String? = null,
-    val isImported: Boolean = false // true for real EPUBs, false for fake data
+    val isImported: Boolean = false, // true for imported EPUBs
+    val fileChecksum: String? = null, // SHA-256 checksum to detect file changes
+    val userEditedMetadata: Boolean = false, // Track if user has edited metadata
+    
+    // Cover display preferences
+    val coverDisplayMode: CoverDisplayMode = CoverDisplayMode.AUTO,
+    val userSelectedColor: Long? = null // Override color selected by user
 ) {
     // Convenience property for UI
     val coverColorComposeColor: Color
-        get() = Color(coverColor)
+        get() = Color(coverColor.toULong())
+    
+    /**
+     * Get the effective cover color based on user preferences and fallback logic
+     */
+    fun getEffectiveCoverColor(): Color {
+        return when (coverDisplayMode) {
+            CoverDisplayMode.COLOR_ONLY -> {
+                // Always use color (user selected or default)
+                val colorValue = userSelectedColor ?: coverColor
+                Color(colorValue.toULong())
+            }
+            CoverDisplayMode.AUTO -> {
+                // Use cover art if available, fallback to color
+                if (hasCoverArt()) {
+                    // This will be handled by UI layer for actual image display
+                    // Return transparent or a placeholder for color-based backgrounds
+                    Color.Transparent
+                } else {
+                    val colorValue = userSelectedColor ?: coverColor
+                    Color(colorValue.toULong())
+                }
+            }
+            CoverDisplayMode.COVER_ART_ONLY -> {
+                // Use cover art if available, otherwise show placeholder
+                if (hasCoverArt()) {
+                    Color.Transparent
+                } else {
+                    // Show a neutral placeholder color
+                    Color(0xFF424242UL)
+                }
+            }
+        }
+    }
+    
+    /**
+     * Check if book has cover art available
+     */
+    fun hasCoverArt(): Boolean {
+        return !coverImagePath.isNullOrBlank() && 
+               coverImagePath?.let { File(it).exists() } == true
+    }
+    
+    /**
+     * Determine if we should show cover art image
+     */
+    fun shouldShowCoverArt(): Boolean {
+        return when (coverDisplayMode) {
+            CoverDisplayMode.COLOR_ONLY -> false
+            CoverDisplayMode.AUTO -> hasCoverArt()
+            CoverDisplayMode.COVER_ART_ONLY -> hasCoverArt()
+        }
+    }
         
     companion object {
         fun fromColor(color: Color): Long = color.value.toLong()

@@ -37,11 +37,14 @@ data class ParsedEpub(
     val chapters: List<EpubChapter>,
     val tableOfContents: List<EpubTocEntry>,
     val coverImagePath: String? = null,
-    val filePath: String,
+    val filePath: String?,
     val fileSize: Long,
-    val lastModified: Long
+    val lastModified: Long,
+    val images: Map<String, String> = emptyMap(), // Map of image href to zip paths
+    val opfPath: String = "OEBPS/content.opf", // OPF file path for lazy loading
+    val totalChapters: Int? = null // Direct chapter count for fast import
 ) {
-    val totalChapters: Int get() = chapters.size
+    val chapterCount: Int get() = totalChapters ?: chapters.size
     
     fun getChapterByOrder(order: Int): EpubChapter? {
         return chapters.find { it.order == order }

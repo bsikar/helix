@@ -16,6 +16,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -25,6 +28,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import com.bsikar.helix.data.Book
 import com.bsikar.helix.data.ReaderSettings
 import com.bsikar.helix.data.ReadingMode
@@ -33,9 +37,28 @@ import com.bsikar.helix.data.UserPreferencesManager
 import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.theme.ThemeManager
 import com.bsikar.helix.theme.ThemeMode
-import com.bsikar.helix.ui.components.HighlightedText
+import com.bsikar.helix.ui.components.SearchUtils
 import com.bsikar.helix.ui.components.BookmarkDialog
 import com.bsikar.helix.data.Bookmark
+import com.bsikar.helix.data.LibraryManager
+import com.bsikar.helix.data.ParsedEpub
+import com.bsikar.helix.data.EpubParser
+import org.jsoup.Jsoup
+import coil.compose.AsyncImage
+import com.bsikar.helix.ui.components.EpubImageComponent
+import java.io.File
+
+/**
+ * Represents different types of content that can appear in EPUB
+ */
+sealed class ContentElement {
+    data class TextElement(val text: androidx.compose.ui.text.AnnotatedString) : ContentElement()
+    data class ImageElement(
+        val imagePath: String,
+        val alt: String = "",
+        val originalSrc: String = ""
+    ) : ContentElement()
+}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -44,20 +67,35 @@ fun ReaderScreen(
     theme: AppTheme,
     onBackClick: () -> Unit,
     onUpdateReadingPosition: (String, Int, Int, Int) -> Unit,
-    preferencesManager: UserPreferencesManager
+    onUpdateBookSettings: (Book) -> Unit = { _ -> },
+    preferencesManager: UserPreferencesManager,
+    libraryManager: LibraryManager
 ) {
     var currentPage by remember { mutableIntStateOf(book.currentPage) }
-    val totalPages = book.totalPages
     var showSettings by remember { mutableStateOf(false) }
     var showChapterDialog by remember { mutableStateOf(false) }
     var showBookmarkDialog by remember { mutableStateOf(false) }
-    val scrollState = rememberScrollState(initial = book.scrollPosition)
+    // Note: Scroll position tracking temporarily removed due to LazyColumn implementation
+    
+    // State for EPUB content
+    var parsedEpub by remember { mutableStateOf<ParsedEpub?>(null) }
+    
+    // Use dynamic chapter count for imported EPUBs - ensure non-zero value during loading
+    val totalPages = remember(parsedEpub, book.totalPages) {
+        if (book.isImported && parsedEpub != null) {
+            maxOf(1, parsedEpub!!.chapters.size)
+        } else {
+            maxOf(1, book.totalPages)
+        }
+    }
+    var isLoadingContent by remember { mutableStateOf(false) }
+    var currentChapterIndex by remember { mutableIntStateOf((book.currentChapter - 1).coerceAtLeast(0)) }
     
     // Get bookmarks for this book
     val bookmarks by remember { derivedStateOf { preferencesManager.getBookmarks(book.id) } }
     val isCurrentPageBookmarked by remember { 
         derivedStateOf { 
-            preferencesManager.isPageBookmarked(book.id, book.currentChapter, currentPage) 
+            preferencesManager.isPageBookmarked(book.id, currentChapterIndex, currentPage) 
         } 
     }
     
@@ -70,50 +108,123 @@ fun ReaderScreen(
         readerSettings = userPreferences.selectedReaderSettings
     }
     
-    // Save reading position when page changes
-    LaunchedEffect(currentPage) {
-        onUpdateReadingPosition(book.id, currentPage, book.currentChapter, scrollState.value)
+    // Load EPUB content when book changes
+    LaunchedEffect(book.id) {
+        if (book.isImported) {
+            isLoadingContent = true
+            parsedEpub = libraryManager.getEpubContent(book)
+            isLoadingContent = false
+        }
     }
     
-    // Save scroll position periodically
-    LaunchedEffect(scrollState.value) {
-        onUpdateReadingPosition(book.id, currentPage, book.currentChapter, scrollState.value)
+    // Save reading position when page or chapter changes
+    LaunchedEffect(currentPage, currentChapterIndex) {
+        onUpdateReadingPosition(book.id, currentPage, currentChapterIndex + 1, 0) // scrollPosition = 0 for now
     }
     
-    // Sample chapters
-    val sampleChapters = remember {
-        listOf(
-            "Chapter 1: The Beginning",
-            "Chapter 2: The Journey Starts",
-            "Chapter 3: First Obstacles",
-            "Chapter 4: New Allies",
-            "Chapter 5: Dark Revelations",
-            "Chapter 6: The Hidden Truth",
-            "Chapter 7: Confrontation",
-            "Chapter 8: Battle of Wills",
-            "Chapter 9: Final Stand",
-            "Chapter 10: Resolution"
-        )
+    // Get chapters from parsed EPUB or use sample chapters for non-imported books
+    val chapters = remember(parsedEpub) {
+        if (book.isImported && parsedEpub != null) {
+            parsedEpub!!.chapters.map { it.title }
+        } else {
+            // Sample chapters for non-imported books
+            listOf(
+                "Chapter 1: The Beginning",
+                "Chapter 2: The Journey Starts",
+                "Chapter 3: First Obstacles",
+                "Chapter 4: New Allies",
+                "Chapter 5: Dark Revelations",
+                "Chapter 6: The Hidden Truth",
+                "Chapter 7: Confrontation",
+                "Chapter 8: Battle of Wills",
+                "Chapter 9: Final Stand",
+                "Chapter 10: Resolution"
+            )
+        }
     }
     
-    // Sample book content
-    val sampleContent = """
-        Chapter 1: The Beginning
+    // State for lazy-loaded chapter content
+    var currentContent by remember { mutableStateOf<List<ContentElement>>(emptyList()) }
+    var isLoadingChapter by remember { mutableStateOf(true) }
+    val context = LocalContext.current
+    
+    // Load chapter content on demand
+    LaunchedEffect(parsedEpub, currentChapterIndex) {
+        isLoadingChapter = true
+        isLoadingContent = true
         
-        Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+        if (book.isImported) {
+            parsedEpub?.let { epub ->
+                val chapter = epub.chapters.getOrNull(currentChapterIndex)
+                if (chapter != null) {
+                    // Check if content is already loaded
+                    if (chapter.content.isNotEmpty()) {
+                        // Content already available (legacy)
+                        currentContent = parseHtmlToContentElements(chapter.content, readerSettings, epub.images)
+                    } else {
+                        // Load content on demand - handle both file paths and URIs
+                        val epubParser = EpubParser(context)
+                        val contentResult = if (book.originalUri != null) {
+                            // Use URI-based loading for SAF imports
+                            epubParser.loadChapterContentFromUri(
+                                context = context,
+                                uri = book.originalUri!!,
+                                chapterHref = chapter.href,
+                                opfPath = epub.opfPath
+                            )
+                        } else if (epub.filePath != null) {
+                            // Use file-based loading for direct file imports
+                            epubParser.loadChapterContent(
+                                epubFilePath = epub.filePath!!,
+                                chapterHref = chapter.href,
+                                opfPath = epub.opfPath
+                            )
+                        } else {
+                            // Fallback: try to use originalUri if no file path
+                            book.originalUri?.let { uri ->
+                                epubParser.loadChapterContentFromUri(
+                                    context = context,
+                                    uri = uri,
+                                    chapterHref = chapter.href,
+                                    opfPath = epub.opfPath
+                                )
+                            } ?: Result.failure(Exception("No file path or URI available"))
+                        }
+                        
+                        if (contentResult.isSuccess) {
+                            val chapterContent = contentResult.getOrThrow()
+                            currentContent = parseHtmlToContentElements(chapterContent, readerSettings, epub.images)
+                        } else {
+                            currentContent = listOf(ContentElement.TextElement(
+                                androidx.compose.ui.text.AnnotatedString("Error loading chapter: ${contentResult.exceptionOrNull()?.message}")
+                            ))
+                        }
+                    }
+                } else {
+                    currentContent = listOf(ContentElement.TextElement(
+                        androidx.compose.ui.text.AnnotatedString("Chapter not found")
+                    ))
+                }
+            } ?: run {
+                currentContent = listOf(ContentElement.TextElement(
+                    androidx.compose.ui.text.AnnotatedString("EPUB not loaded")
+                ))
+            }
+        } else {
+            // Placeholder for non-imported books
+            val placeholderText = androidx.compose.ui.text.buildAnnotatedString {
+                pushStyle(androidx.compose.ui.text.SpanStyle(
+                    fontSize = readerSettings.fontSize.sp,
+                    fontWeight = FontWeight.Medium
+                ))
+                append("This book needs to be imported as an EPUB file to view its content.")
+            }
+            currentContent = listOf(ContentElement.TextElement(placeholderText))
+        }
         
-        Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
-        
-        Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.
-        
-        Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt.
-        
-        Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem.
-        
-        Ut enim ad minima veniam, quis nostrum exercitationem ullam corporis suscipit laboriosam, nisi ut aliquid ex ea commodi consequatur? Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam nihil molestiae consequatur.
-        
-        At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident.
-    """.trimIndent()
+        isLoadingChapter = false
+        isLoadingContent = false
+    }
 
     if (showSettings) {
         ReaderSettingsScreen(
@@ -175,9 +286,9 @@ fun ReaderScreen(
                                 val newBookmark = Bookmark(
                                     bookId = book.id,
                                     bookTitle = book.title,
-                                    chapterNumber = book.currentChapter,
+                                    chapterNumber = currentChapterIndex,
                                     pageNumber = currentPage,
-                                    scrollPosition = scrollState.value
+                                    scrollPosition = 0 // Scroll position tracking temporarily disabled
                                 )
                                 preferencesManager.addBookmark(newBookmark)
                             },
@@ -219,11 +330,43 @@ fun ReaderScreen(
         },
         bottomBar = {
             ReaderBottomBar(
-                currentPage = currentPage,
-                totalPages = totalPages,
-                progress = currentPage.toFloat() / totalPages,
-                onPreviousPage = { if (currentPage > 1) currentPage-- },
-                onNextPage = { if (currentPage < totalPages) currentPage++ },
+                currentPage = if (book.isImported) {
+                    if (parsedEpub != null) currentChapterIndex + 1 else 1
+                } else {
+                    currentPage
+                },
+                totalPages = if (book.isImported) {
+                    if (parsedEpub != null) totalPages else 1
+                } else {
+                    totalPages
+                },
+                progress = if (book.isImported) {
+                    if (parsedEpub != null && totalPages > 0) {
+                        (currentChapterIndex + 1).toFloat() / totalPages
+                    } else {
+                        0f
+                    }
+                } else {
+                    if (totalPages > 0) currentPage.toFloat() / totalPages else 0f
+                },
+                onPreviousPage = { 
+                    if (book.isImported && parsedEpub != null) {
+                        // Chapter-based navigation for EPUBs
+                        if (currentChapterIndex > 0) currentChapterIndex--
+                    } else {
+                        // Page-based navigation for non-imported books
+                        if (currentPage > 1) currentPage--
+                    }
+                },
+                onNextPage = { 
+                    if (book.isImported && parsedEpub != null) {
+                        // Chapter-based navigation for EPUBs
+                        if (currentChapterIndex < totalPages - 1) currentChapterIndex++
+                    } else {
+                        // Page-based navigation for non-imported books
+                        if (currentPage < totalPages) currentPage++
+                    }
+                },
                 onProgressTap = { showChapterDialog = true },
                 theme = theme
             )
@@ -236,33 +379,99 @@ fun ReaderScreen(
         ) {
             // Progress indicator
             LinearProgressIndicator(
-                progress = { currentPage.toFloat() / totalPages },
+                progress = { 
+                    if (book.isImported) {
+                        if (parsedEpub != null && totalPages > 0) {
+                            (currentChapterIndex + 1).toFloat() / totalPages
+                        } else {
+                            0f
+                        }
+                    } else {
+                        if (totalPages > 0) currentPage.toFloat() / totalPages else 0f
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
                 color = theme.accentColor,
                 trackColor = theme.secondaryTextColor.copy(alpha = 0.2f)
             )
             
             // Content area
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(scrollState)
-                    .padding(
+            if (isLoadingContent) {
+                // Show loading indicator
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        color = theme.accentColor
+                    )
+                }
+            } else {
+                // Create a stable snapshot of content to prevent concurrent modification crashes
+                val stableContent = remember(currentContent) { currentContent.toList() }
+                
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
                         horizontal = readerSettings.marginHorizontal.dp,
                         vertical = readerSettings.marginVertical.dp
-                    )
-            ) {
-                Text(
-                    text = sampleContent,
-                    fontSize = readerSettings.fontSize.sp,
-                    lineHeight = (readerSettings.fontSize * readerSettings.lineHeight).sp,
-                    color = readerSettings.readingMode.textColor,
-                    textAlign = when (readerSettings.textAlign) {
-                        TextAlignment.LEFT -> TextAlign.Start
-                        TextAlignment.CENTER -> TextAlign.Center
-                        TextAlignment.JUSTIFY -> TextAlign.Justify
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(
+                        count = stableContent.size,
+                        key = { index -> "content_$index" }
+                    ) { index ->
+                        // Safety check to prevent index out of bounds
+                        if (index < stableContent.size) {
+                            val element = stableContent[index]
+                            when (element) {
+                                is ContentElement.TextElement -> {
+                                    Text(
+                                        text = element.text,
+                                        fontSize = readerSettings.fontSize.sp,
+                                        lineHeight = (readerSettings.fontSize * readerSettings.lineHeight).sp,
+                                        color = readerSettings.readingMode.textColor,
+                                        textAlign = when (readerSettings.textAlign) {
+                                            TextAlignment.LEFT -> TextAlign.Start
+                                            TextAlignment.CENTER -> TextAlign.Center
+                                            TextAlignment.JUSTIFY -> TextAlign.Justify
+                                        }
+                                    )
+                                }
+                                is ContentElement.ImageElement -> {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        // Load image directly from EPUB if available
+                                        if (book.isImported && parsedEpub != null) {
+                                            val epub = parsedEpub!!
+                                            EpubImageComponent(
+                                                epubFilePath = epub.filePath,
+                                                originalUri = book.originalUri,
+                                                imageZipPath = element.imagePath,
+                                                contentDescription = element.alt.ifEmpty { "EPUB Image" },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 8.dp)
+                                            )
+                                        } else {
+                                            // Fallback for extracted files (if any)
+                                            AsyncImage(
+                                                model = File(element.imagePath),
+                                                contentDescription = element.alt.ifEmpty { "EPUB Image" },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 8.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
-                )
+                }
             }
         }
     }
@@ -270,12 +479,12 @@ fun ReaderScreen(
     // Chapter selection dialog
     if (showChapterDialog) {
         ChapterSelectionDialog(
-            chapters = sampleChapters,
-            currentChapter = book.currentChapter,
+            chapters = chapters,
+            currentChapter = currentChapterIndex + 1, // Convert 0-based to 1-based for display
             onChapterSelected = { chapterIndex ->
                 // Navigate to selected chapter
-                // For demo purposes, just change the page
-                currentPage = (chapterIndex + 1) * 15 // Simulate chapter starts
+                currentChapterIndex = chapterIndex
+                currentPage = 1 // Reset to first page of chapter
                 showChapterDialog = false
             },
             onDismiss = { showChapterDialog = false },
@@ -292,7 +501,7 @@ fun ReaderScreen(
                 // Navigate to bookmarked location
                 currentPage = bookmark.pageNumber
                 // Note: In a real implementation, you'd also update scroll position
-                // scrollState.scrollTo(bookmark.scrollPosition)
+                // Note: scroll position restoration temporarily disabled
                 showBookmarkDialog = false
             },
             onBookmarkDelete = { bookmarkId ->
@@ -302,20 +511,21 @@ fun ReaderScreen(
                 preferencesManager.updateBookmarkNote(bookmarkId, note)
             },
             theme = theme,
-            currentChapter = book.currentChapter,
+            currentChapter = currentChapterIndex,
             currentPage = currentPage,
             onQuickBookmark = {
                 val newBookmark = Bookmark(
                     bookId = book.id,
                     bookTitle = book.title,
-                    chapterNumber = book.currentChapter,
+                    chapterNumber = currentChapterIndex,
                     pageNumber = currentPage,
-                    scrollPosition = scrollState.value
+                    scrollPosition = 0 // Scroll position tracking temporarily disabled
                 )
                 preferencesManager.addBookmark(newBookmark)
             }
         )
     }
+    
 }
 
 @Composable
@@ -555,25 +765,24 @@ fun ChapterSelectionDialog(
                                 Spacer(modifier = Modifier.width(12.dp))
                                 
                                 // Chapter title with search highlighting
-                                if (searchQuery.isNotEmpty() && searchQuery.isNotBlank()) {
-                                    HighlightedText(
-                                        text = title,
-                                        searchQuery = searchQuery,
-                                        normalColor = if (isCurrentChapter) theme.accentColor else theme.primaryTextColor,
-                                        highlightColor = theme.accentColor,
-                                        fontSize = 14.sp,
-                                        fontWeight = if (isCurrentChapter) FontWeight.Medium else FontWeight.Normal,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                } else {
-                                    Text(
-                                        text = title,
-                                        fontSize = 14.sp,
-                                        color = if (isCurrentChapter) theme.accentColor else theme.primaryTextColor,
-                                        fontWeight = if (isCurrentChapter) FontWeight.Medium else FontWeight.Normal,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
+                                Text(
+                                    text = if (searchQuery.isNotEmpty() && searchQuery.isNotBlank()) {
+                                        SearchUtils.createHighlightedText(
+                                            text = title,
+                                            query = searchQuery,
+                                            baseColor = if (isCurrentChapter) theme.accentColor else theme.primaryTextColor,
+                                            highlightColor = theme.accentColor,
+                                            fontSize = 14.sp,
+                                            highlightFontWeight = FontWeight.Bold
+                                        )
+                                    } else {
+                                        androidx.compose.ui.text.AnnotatedString(title)
+                                    },
+                                    fontSize = 14.sp,
+                                    fontWeight = if (isCurrentChapter) FontWeight.Medium else FontWeight.Normal,
+                                    modifier = Modifier.weight(1f),
+                                    color = if (searchQuery.isNotEmpty() && searchQuery.isNotBlank()) Color.Unspecified else if (isCurrentChapter) theme.accentColor else theme.primaryTextColor
+                                )
                                 
                                 // Current indicator
                                 if (isCurrentChapter) {
@@ -599,6 +808,465 @@ fun ChapterSelectionDialog(
     )
 }
 
+/**
+ * Converts HTML content to AnnotatedString with proper formatting
+ */
+fun parseHtmlToAnnotatedString(htmlContent: String, readerSettings: ReaderSettings, images: Map<String, String> = emptyMap()): androidx.compose.ui.text.AnnotatedString {
+    return androidx.compose.ui.text.buildAnnotatedString {
+        try {
+            val doc = org.jsoup.Jsoup.parse(htmlContent)
+            
+            // Remove script and style elements
+            doc.select("script, style").remove()
+            
+            // Process elements in order to maintain structure
+            parseElement(doc.body(), this, readerSettings, images)
+            
+        } catch (e: Exception) {
+            append("Error parsing chapter content: ${e.message}")
+        }
+    }
+}
+
+/**
+ * Normalize image paths to match the keys in the images map
+ * Converts relative paths like "../Images/cover.jpg" to "Images/cover.jpg"
+ */
+private fun normalizeImagePath(src: String): String {
+    if (src.isBlank()) return src
+    
+    // Remove leading ../ patterns
+    var normalized = src
+    while (normalized.startsWith("../")) {
+        normalized = normalized.substring(3)
+    }
+    
+    // Remove leading ./ patterns
+    while (normalized.startsWith("./")) {
+        normalized = normalized.substring(2)
+    }
+    
+    // Remove leading slash
+    if (normalized.startsWith("/")) {
+        normalized = normalized.substring(1)
+    }
+    
+    return normalized
+}
+
+/**
+ * Parse HTML content to a list of ContentElement objects for mixed content display
+ */
+fun parseHtmlToContentElements(
+    htmlContent: String,
+    readerSettings: ReaderSettings,
+    images: Map<String, String>
+): List<ContentElement> {
+    val doc = Jsoup.parse(htmlContent)
+    val elements = mutableListOf<ContentElement>()
+    
+    try {
+        // Remove script and style elements
+        doc.select("script, style").remove()
+        
+        // Process elements and collect content
+        parseElementToContentList(doc.body(), elements, readerSettings, images)
+        
+    } catch (e: Exception) {
+        elements.add(ContentElement.TextElement(
+            androidx.compose.ui.text.AnnotatedString("Error parsing chapter content: ${e.message}")
+        ))
+    }
+    
+    return elements.ifEmpty { 
+        listOf(ContentElement.TextElement(androidx.compose.ui.text.AnnotatedString("No content found")))
+    }
+}
+
+/**
+ * Process HTML elements and convert to ContentElement list
+ */
+private fun parseElementToContentList(
+    element: org.jsoup.nodes.Element,
+    elements: MutableList<ContentElement>,
+    readerSettings: ReaderSettings,
+    images: Map<String, String>
+) {
+    var textBuilder = androidx.compose.ui.text.AnnotatedString.Builder()
+    var hasTextContent = false
+    
+    for (node in element.childNodes()) {
+        when (node) {
+            is org.jsoup.nodes.TextNode -> {
+                val text = node.text()
+                if (text.isNotBlank()) {
+                    textBuilder.append(text)
+                    hasTextContent = true
+                }
+            }
+            is org.jsoup.nodes.Element -> {
+                when (node.tagName().lowercase()) {
+                    "img" -> {
+                        // If we have accumulated text, add it first
+                        if (hasTextContent) {
+                            elements.add(ContentElement.TextElement(textBuilder.toAnnotatedString()))
+                            // Create a new builder for the next text segment
+                            textBuilder = androidx.compose.ui.text.AnnotatedString.Builder()
+                            hasTextContent = false
+                        }
+                        
+                        // Add the image
+                        val src = node.attr("src")
+                        val alt = node.attr("alt")
+                        val normalizedSrc = normalizeImagePath(src)
+                        val imagePath = images[normalizedSrc] ?: images[src]
+                        
+                        if (imagePath != null) {
+                            elements.add(ContentElement.ImageElement(
+                                imagePath = imagePath,
+                                alt = alt,
+                                originalSrc = src
+                            ))
+                        }
+                    }
+                    else -> {
+                        // Check if this element contains any img tags
+                        val nestedImgs = node.select("img")
+                        if (nestedImgs.isNotEmpty()) {
+                            // If we have accumulated text, add it first
+                            if (hasTextContent) {
+                                elements.add(ContentElement.TextElement(textBuilder.toAnnotatedString()))
+                                textBuilder = androidx.compose.ui.text.AnnotatedString.Builder()
+                                hasTextContent = false
+                            }
+                            
+                            // Recursively parse this element for images and text
+                            parseElementToContentList(node, elements, readerSettings, images)
+                        } else {
+                            // No images, just parse for text content
+                            parseElementRecursive(node, textBuilder, readerSettings, images)
+                            hasTextContent = true
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Add any remaining text content
+    if (hasTextContent) {
+        elements.add(ContentElement.TextElement(textBuilder.toAnnotatedString()))
+    }
+}
+
+/**
+ * Parse HTML elements recursively for text content (similar to existing parseElement but for text builder)
+ */
+private fun parseElementRecursive(
+    node: org.jsoup.nodes.Element,
+    builder: androidx.compose.ui.text.AnnotatedString.Builder,
+    readerSettings: ReaderSettings,
+    images: Map<String, String>
+) {
+    when (node.tagName().lowercase()) {
+        "h1" -> {
+            builder.append("\n\n")
+            builder.pushStyle(androidx.compose.ui.text.SpanStyle(
+                fontSize = (readerSettings.fontSize * 1.8f).sp,
+                fontWeight = FontWeight.Bold
+            ))
+            parseTextContent(node, builder, readerSettings, images)
+            builder.pop()
+            builder.append("\n\n")
+        }
+        "h2" -> {
+            builder.append("\n\n")
+            builder.pushStyle(androidx.compose.ui.text.SpanStyle(
+                fontSize = (readerSettings.fontSize * 1.6f).sp,
+                fontWeight = FontWeight.Bold
+            ))
+            parseTextContent(node, builder, readerSettings, images)
+            builder.pop()
+            builder.append("\n\n")
+        }
+        "h3" -> {
+            builder.append("\n\n")
+            builder.pushStyle(androidx.compose.ui.text.SpanStyle(
+                fontSize = (readerSettings.fontSize * 1.4f).sp,
+                fontWeight = FontWeight.Bold
+            ))
+            parseTextContent(node, builder, readerSettings, images)
+            builder.pop()
+            builder.append("\n\n")
+        }
+        "h4", "h5", "h6" -> {
+            builder.append("\n\n")
+            builder.pushStyle(androidx.compose.ui.text.SpanStyle(
+                fontSize = (readerSettings.fontSize * 1.2f).sp,
+                fontWeight = FontWeight.Bold
+            ))
+            parseTextContent(node, builder, readerSettings, images)
+            builder.pop()
+            builder.append("\n\n")
+        }
+        "p" -> {
+            parseTextContent(node, builder, readerSettings, images)
+            builder.append("\n\n")
+        }
+        "br" -> {
+            builder.append("\n")
+        }
+        "strong", "b" -> {
+            builder.pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold))
+            parseTextContent(node, builder, readerSettings, images)
+            builder.pop()
+        }
+        "em", "i" -> {
+            builder.pushStyle(androidx.compose.ui.text.SpanStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic))
+            parseTextContent(node, builder, readerSettings, images)
+            builder.pop()
+        }
+        "u" -> {
+            builder.pushStyle(androidx.compose.ui.text.SpanStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline))
+            parseTextContent(node, builder, readerSettings, images)
+            builder.pop()
+        }
+        "blockquote" -> {
+            builder.append("\n\n")
+            builder.pushStyle(androidx.compose.ui.text.SpanStyle(
+                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                color = readerSettings.readingMode.textColor.copy(alpha = 0.8f)
+            ))
+            builder.append("\"")
+            parseTextContent(node, builder, readerSettings, images)
+            builder.append("\"")
+            builder.pop()
+            builder.append("\n\n")
+        }
+        "img" -> {
+            // Skip images here as they're handled separately
+        }
+        else -> {
+            parseTextContent(node, builder, readerSettings, images)
+        }
+    }
+}
+
+/**
+ * Parse text content from elements, handling child nodes
+ */
+private fun parseTextContent(
+    element: org.jsoup.nodes.Element,
+    builder: androidx.compose.ui.text.AnnotatedString.Builder,
+    readerSettings: ReaderSettings,
+    images: Map<String, String>
+) {
+    for (child in element.childNodes()) {
+        when (child) {
+            is org.jsoup.nodes.TextNode -> {
+                builder.append(child.text())
+            }
+            is org.jsoup.nodes.Element -> {
+                if (child.tagName().lowercase() != "img") {
+                    parseElementRecursive(child, builder, readerSettings, images)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Recursively parse HTML elements and apply appropriate formatting
+ */
+private fun parseElement(
+    element: org.jsoup.nodes.Element, 
+    builder: androidx.compose.ui.text.AnnotatedString.Builder,
+    readerSettings: ReaderSettings,
+    images: Map<String, String> = emptyMap()
+) {
+    for (node in element.childNodes()) {
+        when (node) {
+            is org.jsoup.nodes.TextNode -> {
+                // Add text content
+                val text = node.text()
+                if (text.isNotBlank()) {
+                    builder.append(text)
+                }
+            }
+            is org.jsoup.nodes.Element -> {
+                when (node.tagName().lowercase()) {
+                    "h1" -> {
+                        builder.append("\n\n")
+                        builder.pushStyle(androidx.compose.ui.text.SpanStyle(
+                            fontSize = (readerSettings.fontSize * 1.8f).sp,
+                            fontWeight = FontWeight.Bold
+                        ))
+                        parseElement(node, builder, readerSettings, images)
+                        builder.pop()
+                        builder.append("\n\n")
+                    }
+                    "h2" -> {
+                        builder.append("\n\n")
+                        builder.pushStyle(androidx.compose.ui.text.SpanStyle(
+                            fontSize = (readerSettings.fontSize * 1.6f).sp,
+                            fontWeight = FontWeight.Bold
+                        ))
+                        parseElement(node, builder, readerSettings, images)
+                        builder.pop()
+                        builder.append("\n\n")
+                    }
+                    "h3" -> {
+                        builder.append("\n\n")
+                        builder.pushStyle(androidx.compose.ui.text.SpanStyle(
+                            fontSize = (readerSettings.fontSize * 1.4f).sp,
+                            fontWeight = FontWeight.Bold
+                        ))
+                        parseElement(node, builder, readerSettings, images)
+                        builder.pop()
+                        builder.append("\n\n")
+                    }
+                    "h4", "h5", "h6" -> {
+                        builder.append("\n\n")
+                        builder.pushStyle(androidx.compose.ui.text.SpanStyle(
+                            fontSize = (readerSettings.fontSize * 1.2f).sp,
+                            fontWeight = FontWeight.Bold
+                        ))
+                        parseElement(node, builder, readerSettings, images)
+                        builder.pop()
+                        builder.append("\n\n")
+                    }
+                    "p" -> {
+                        parseElement(node, builder, readerSettings, images)
+                        builder.append("\n\n")
+                    }
+                    "br" -> {
+                        builder.append("\n")
+                    }
+                    "div" -> {
+                        parseElement(node, builder, readerSettings, images)
+                        if (node.text().trim().isNotEmpty()) {
+                            builder.append("\n")
+                        }
+                    }
+                    "span" -> {
+                        // Preserve spans but don't add extra spacing
+                        parseElement(node, builder, readerSettings, images)
+                    }
+                    "center" -> {
+                        builder.append("\n\n")
+                        // Note: Compose doesn't support center alignment per span, 
+                        // but we can add visual indicators
+                        builder.append("          ") // Indentation to suggest centering
+                        parseElement(node, builder, readerSettings, images)
+                        builder.append("\n\n")
+                    }
+                    "hr" -> {
+                        builder.append("\n\n────────────────────────────────\n\n")
+                    }
+                    "pre", "code" -> {
+                        builder.append("\n\n")
+                        builder.pushStyle(androidx.compose.ui.text.SpanStyle(
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            fontSize = (readerSettings.fontSize * 0.9f).sp,
+                            background = readerSettings.readingMode.textColor.copy(alpha = 0.1f)
+                        ))
+                        parseElement(node, builder, readerSettings, images)
+                        builder.pop()
+                        builder.append("\n\n")
+                    }
+                    "strong", "b" -> {
+                        builder.pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold))
+                        parseElement(node, builder, readerSettings, images)
+                        builder.pop()
+                    }
+                    "em", "i" -> {
+                        builder.pushStyle(androidx.compose.ui.text.SpanStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic))
+                        parseElement(node, builder, readerSettings, images)
+                        builder.pop()
+                    }
+                    "u" -> {
+                        builder.pushStyle(androidx.compose.ui.text.SpanStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline))
+                        parseElement(node, builder, readerSettings, images)
+                        builder.pop()
+                    }
+                    "blockquote" -> {
+                        builder.append("\n\n")
+                        builder.pushStyle(androidx.compose.ui.text.SpanStyle(
+                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                            color = readerSettings.readingMode.textColor.copy(alpha = 0.8f)
+                        ))
+                        builder.append("\"")
+                        parseElement(node, builder, readerSettings, images)
+                        builder.append("\"")
+                        builder.pop()
+                        builder.append("\n\n")
+                    }
+                    "li" -> {
+                        builder.append("\n  • ")
+                        parseElement(node, builder, readerSettings, images)
+                    }
+                    "ul" -> {
+                        builder.append("\n")
+                        parseElement(node, builder, readerSettings, images)
+                        builder.append("\n")
+                    }
+                    "ol" -> {
+                        builder.append("\n")
+                        // For ordered lists, we would need to track the number
+                        // For now, just use bullet points
+                        parseElement(node, builder, readerSettings, images)
+                        builder.append("\n")
+                    }
+                    "table", "tr", "td", "th" -> {
+                        // Simple table handling - just add spacing
+                        if (node.tagName() == "table") {
+                            builder.append("\n\n")
+                        }
+                        parseElement(node, builder, readerSettings, images)
+                        if (node.tagName() == "tr") {
+                            builder.append("\n")
+                        } else if (node.tagName() == "td" || node.tagName() == "th") {
+                            builder.append("  |  ")
+                        }
+                        if (node.tagName() == "table") {
+                            builder.append("\n\n")
+                        }
+                    }
+                    "img" -> {
+                        val src = node.attr("src")
+                        val alt = node.attr("alt")
+                        
+                        // Normalize the image path to match the keys in the images map
+                        val normalizedSrc = normalizeImagePath(src)
+                        val imagePath = images[normalizedSrc] ?: images[src]
+                        
+                        if (imagePath != null) {
+                            // Display image filename as placeholder with path info
+                            val fileName = java.io.File(imagePath).name
+                            builder.append("\n\n[Image: $fileName]")
+                            if (alt.isNotEmpty()) {
+                                builder.append(" ($alt)")
+                            }
+                            builder.append("\n\n")
+                        } else if (alt.isNotEmpty()) {
+                            // Show alt text if available
+                            builder.append("\n\n[Image: $alt]\n\n")
+                        } else if (src.isNotEmpty()) {
+                            // Show source if no alt text - this helps debug path issues
+                            builder.append("\n\n[Image: $src]\n\n")
+                        }
+                    }
+                    else -> {
+                        // Default case: just parse child elements
+                        parseElement(node, builder, readerSettings, images)
+                    }
+                }
+            }
+        }
+    }
+}
+
+
 @Preview(showBackground = true)
 @Composable
 fun ReaderScreenPreview() {
@@ -616,7 +1284,9 @@ fun ReaderScreenPreview() {
             theme = theme,
             onBackClick = { },
             onUpdateReadingPosition = { _, _, _, _ -> },
-            preferencesManager = UserPreferencesManager(androidx.compose.ui.platform.LocalContext.current)
+            onUpdateBookSettings = { _ -> },
+            preferencesManager = UserPreferencesManager(androidx.compose.ui.platform.LocalContext.current),
+            libraryManager = LibraryManager(androidx.compose.ui.platform.LocalContext.current, UserPreferencesManager(androidx.compose.ui.platform.LocalContext.current))
         )
     }
 }

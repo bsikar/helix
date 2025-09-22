@@ -1,0 +1,211 @@
+# Helix EPUB Reader - Implementation Instructions
+
+You are tasked with implementing comprehensive improvements to the Helix EPUB reader Android application. This document contains detailed instructions for what needs to be implemented. Execute these improvements systematically, following Android development best practices.
+
+**CRITICAL: After completing each numbered task (1.1, 1.2, etc.), you MUST compile the project using `./gradlew build` to ensure no compilation errors before proceeding to the next task. Fix any compilation errors immediately before moving forward. This prevents cascading errors that become impossible to fix.**
+
+## TASK 1: Architecture & Code Quality Improvements
+
+### 1.1 Implement Dependency Injection with Hilt
+**ACTION:** Add Hilt dependency injection framework to the project.
+- Add Hilt dependencies to `build.gradle.kts`
+- Create `@Module` and `@Provides` annotations for `LibraryManager`, `UserPreferencesManager`
+- Convert ViewModels to use `@HiltViewModel` annotation
+- Add `@AndroidEntryPoint` to Activities and Fragments
+- Create Application class with `@HiltAndroidApp`
+
+### 1.2 Centralize State Management
+**ACTION:** Move all UI state from screens to ViewModels.
+- Move sorting and filtering state from `LibraryScreen` to `LibraryViewModel`
+- Ensure state persists across configuration changes
+- Make UI screens purely declarative, consuming state from ViewModels
+- Use `StateFlow` or `LiveData` for reactive state updates
+
+### 1.3 Refactor BookRepository
+**ACTION:** Transform `BookRepository` from static data holder to proper repository pattern.
+- Remove hardcoded sample data
+- Create interface `BookRepository` with concrete implementation `BookRepositoryImpl`
+- Implement methods for CRUD operations on books
+- Use dependency injection to provide repository instances
+
+### 1.4 Restructure Data Layer
+**ACTION:** Reorganize the `data` package into proper sub-packages.
+- Create `data/model/` for data classes (`Book`, `Tag`, etc.)
+- Create `data/source/` for database DAOs and local data sources
+- Create `data/repository/` for repository implementations
+- Move `EpubParser` to appropriate location (consider `data/parser/` or `utils/`)
+- Update all import statements across the project
+
+### 1.5 Migrate to Room Database
+**ACTION:** Replace SharedPreferences JSON storage with Room database.
+- Add Room dependencies to `build.gradle.kts`
+- Create `@Entity` classes for `Book`, `Tag`, `Bookmark`
+- Create `@Dao` interfaces for each entity
+- Create `@Database` class with version and entities
+- Implement migration logic from SharedPreferences to Room
+- Update `LibraryManager` to use Room DAOs instead of SharedPreferences
+
+### 1.6 Implement Robust Error Handling
+**ACTION:** Create structured error handling with sealed classes.
+- Create sealed class `UiState<T>` with `Loading`, `Success<T>`, `Error` states
+- Replace try-catch blocks in `LibraryManager` with proper error propagation
+- Update ViewModels to expose `UiState` instead of direct data
+- Update UI components to handle different UI states appropriately
+
+### 1.7 Externalize String Resources
+**ACTION:** Extract all hardcoded strings to `strings.xml`.
+- Find all hardcoded strings in UI components
+- Create corresponding entries in `res/values/strings.xml`
+- Replace hardcoded strings with `stringResource()` calls in Compose
+- Ensure consistent naming convention for string resources
+
+## TASK 2: UI/UX Enhancements
+
+### 2.1 Implement Cover Art Display
+**ACTION:** Add cover art functionality to BookCard components.
+- Add Coil dependency to `build.gradle.kts`
+- Extract cover art from EPUB files during parsing in `EpubParser`
+- Store cover art paths/data in the database
+- Update `BookCard` component to display cover art using Coil's `AsyncImage`
+- Implement placeholder and error states for missing cover art
+- Add cover art caching for performance
+
+### 2.2 Simplify Infinite Scrolling
+**ACTION:** Replace custom CircularLinkedList with standard LazyRow implementation.
+- Remove `CircularLinkedList` implementation
+- Refactor `InfiniteHorizontalBookScroll` to use `LazyRow` with repeated items
+- Implement proper item cycling using modulo operations
+- Test edge cases and ensure smooth scrolling behavior
+- Simplify the component logic for better maintainability
+
+### 2.3 Improve Search Functionality
+**ACTION:** Move search logic from UI layer to ViewModel.
+- Move search implementation from `SearchUtils` to `LibraryViewModel`
+- Create search state in ViewModel using `StateFlow`
+- Implement debounced search to avoid excessive filtering
+- Expose filtered book list from ViewModel to UI
+- Update UI components to consume search results from ViewModel
+- Remove search logic from UI layer
+
+### 2.4 Optimize Reader Screen Performance
+**ACTION:** Cache parsed content to prevent re-parsing on recomposition.
+- Move HTML parsing logic from `ReaderScreen` to ViewModel or Repository
+- Cache parsed `AnnotatedString` or `ContentElement` lists
+- Only re-parse when content actually changes (not on settings changes)
+- Implement efficient content caching strategy
+- Update ReaderScreen to consume cached content from ViewModel
+
+### 2.5 Implement Responsive UI
+**ACTION:** Apply responsive grid pattern across all screens.
+- Create reusable responsive grid components
+- Update `LibraryScreen`, `BrowseScreen`, and other list-based screens
+- Implement adaptive layouts for tablets and foldables
+- Test on different screen sizes and orientations
+- Ensure consistent spacing and sizing across devices
+
+## TASK 3: Core Feature & Functionality Improvements
+
+### 3.1 Optimize EPUB Parsing Performance
+**ACTION:** Improve memory efficiency during EPUB parsing.
+- Refactor `EpubParser` to avoid copying entire files to temporary locations
+- Implement stream-based parsing where possible
+- Add progress callbacks for large file imports
+- Optimize memory usage during parsing operations
+- **COMPILE AND TEST:** Run `./gradlew build` after completion
+
+### 3.2 Externalize Tag Definitions
+**ACTION:** Move PresetTags from hardcoded object to external resource.
+- Create `tags.json` file in `assets` folder with current tag definitions
+- Update `PresetTags` to load from assets instead of hardcoded list
+- Implement JSON parsing for tag loading
+- Add error handling for missing or malformed tag files
+- **COMPILE AND TEST:** Run `./gradlew build` after completion
+
+### 3.3 Enhance Bookmark Management
+**ACTION:** Move bookmarks from SharedPreferences to Room database.
+- Create `Bookmark` entity class with `@Entity` annotation
+- Create `BookmarkDao` with CRUD operations
+- Update `UserPreferencesManager` to use database for bookmarks
+- Implement bookmark migration from SharedPreferences
+- **COMPILE AND TEST:** Run `./gradlew build` after completion
+
+### 3.4 Expand Test Coverage
+**ACTION:** Add comprehensive testing for ViewModels and UI flows.
+- Create unit tests for all ViewModels
+- Add UI tests using Compose Test Rule for key user flows
+- Test repository implementations and error handling
+- Ensure test coverage for new database operations
+- **COMPILE AND TEST:** Run `./gradlew build` and `./gradlew test` after completion
+
+## TASK 4: Advanced Reading Features
+
+### 4.1 Implement Reading Progress Persistence
+**ACTION:** Store detailed reading position for each book.
+- Create `ReadingProgress` entity with chapter index and scroll position
+- Create `ReadingProgressDao` for database operations
+- Update `ReaderScreen` to save/restore reading position
+- Implement automatic progress saving during reading
+- **COMPILE AND TEST:** Run `./gradlew build` after completion
+
+### 4.2 Implement EPUB Metadata Caching
+**ACTION:** Cache extracted metadata to improve startup performance.
+- Extend database entities to store metadata (title, author, cover, chapters)
+- Update `EpubParser` to cache metadata during parsing
+- Modify library loading to use cached metadata instead of re-parsing
+- Implement cache invalidation for updated EPUB files
+- **COMPILE AND TEST:** Run `./gradlew build` after completion
+
+### 4.3 Implement Chapter Navigation
+**ACTION:** Add table of contents functionality.
+- Extract chapter structure from EPUB `toc.ncx` or `nav.xhtml`
+- Create `Chapter` entity and `ChapterDao`
+- Build chapter navigation UI (drawer or bottom sheet)
+- Implement chapter jumping functionality in `ReaderScreen`
+- **COMPILE AND TEST:** Run `./gradlew build` after completion
+
+### 4.4 Optimize Text Rendering
+**ACTION:** Evaluate and potentially implement WebView-based rendering.
+- Research performance impact of current `AnnotatedString` approach
+- Create proof-of-concept WebView implementation for complex HTML/CSS
+- Compare performance and formatting fidelity
+- Implement the better solution with proper font and layout support
+- **COMPILE AND TEST:** Run `./gradlew build` after completion
+
+### 4.5 Implement Background Import Processing
+**ACTION:** Add WorkManager for non-blocking EPUB imports.
+- Add WorkManager dependency to `build.gradle.kts`
+- Create `EpubImportWorker` for background processing
+- Implement progress notifications during import
+- Update UI to show import progress and results
+- **COMPILE AND TEST:** Run `./gradlew build` after completion
+
+### 4.6 Add Reading Analytics
+**ACTION:** Track and store reading statistics.
+- Create `ReadingSession` entity for tracking reading time
+- Implement reading speed calculation
+- Add analytics dashboard to settings or library
+- Store completion status and reading history
+- **COMPILE AND TEST:** Run `./gradlew build` after completion
+
+### 4.7 Implement Typography and Accessibility
+**ACTION:** Add comprehensive reading customization.
+- Create typography settings in `UserPreferencesManager`
+- Implement font size, family, line spacing, margin controls
+- Update `ReaderScreen` to apply typography settings
+- Add accessibility support for larger fonts and high contrast
+- **COMPILE AND TEST:** Run `./gradlew build` after completion
+
+### 4.8 Implement Theme Support
+**ACTION:** Add dark/light theme with reader-specific themes.
+- Implement Material 3 dynamic theming
+- Add reader-specific themes (sepia, high contrast, night mode)
+- Create theme selection UI in settings
+- Apply themes consistently across all screens
+- **COMPILE AND TEST:** Run `./gradlew build` after completion
+
+## FINAL VERIFICATION
+After completing all tasks, run the following to ensure everything works:
+1. `./gradlew clean build` - Full clean build
+2. `./gradlew test` - Run all tests
+3. Test the app manually on device/emulator
+4. Verify all new features work as expected

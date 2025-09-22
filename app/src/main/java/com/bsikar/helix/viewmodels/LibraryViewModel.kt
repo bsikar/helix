@@ -27,22 +27,14 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     val libraryManager = LibraryManager(application, preferencesManager)
     
     // Convert LibraryManager's books state to StateFlow
-    val allBooks: StateFlow<List<Book>> = libraryManager.books.let { state ->
-        MutableStateFlow(state.value).also { flow ->
-            viewModelScope.launch {
-                // Update flow when state changes
-                snapshotFlow { state.value }.collect { books ->
-                    flow.value = books
-                }
-            }
-        }.asStateFlow()
-    }
-
+    private val _allBooks = MutableStateFlow<List<Book>>(emptyList())
+    val allBooks: StateFlow<List<Book>> = _allBooks.asStateFlow()
+    
     init {
-        // Load fake data initially if library is empty
+        // Observe LibraryManager's books state and update our StateFlow
         viewModelScope.launch {
-            if (libraryManager.books.value.isEmpty()) {
-                libraryManager.addFakeData()
+            snapshotFlow { libraryManager.books.value }.collect { books ->
+                _allBooks.value = books.toList() // Create a new list to ensure state change detection
             }
         }
     }
@@ -132,7 +124,6 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
      */
     fun addBook(book: Book) {
         // This would be handled by LibraryManager.importEpubFile
-        // or LibraryManager.addFakeData
     }
 
     /**
@@ -177,6 +168,13 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
      */
     fun updateBookTags(bookId: String, newTags: List<String>) {
         libraryManager.updateBookTags(bookId, newTags)
+    }
+
+    /**
+     * Updates the settings for a specific book (cover display mode, user color, etc.)
+     */
+    fun updateBookSettings(updatedBook: Book) {
+        libraryManager.updateBookSettings(updatedBook)
     }
 
     /**

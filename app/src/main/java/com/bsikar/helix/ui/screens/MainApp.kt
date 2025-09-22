@@ -48,7 +48,10 @@ fun MainApp(
                 books = seeAllData!!.second,
                 theme = theme,
                 onBackClick = { seeAllData = null },
-                onBookClick = { book -> currentBook = book }
+                onBookClick = { book -> 
+                    currentBook = book
+                    seeAllData = null // Clear see all data to navigate to reader
+                }
             )
         }
         currentBook != null -> {
@@ -61,7 +64,12 @@ fun MainApp(
                 onUpdateReadingPosition = { bookId, currentPage, currentChapter, scrollPosition ->
                     libraryViewModel.updateReadingPosition(bookId, currentPage, currentChapter, scrollPosition)
                 },
-                preferencesManager = preferencesManager
+                onUpdateBookSettings = { updatedBook ->
+                    libraryViewModel.updateBookSettings(updatedBook)
+                    currentBook = updatedBook  // Update the currentBook state immediately
+                },
+                preferencesManager = preferencesManager,
+                libraryManager = libraryViewModel.libraryManager
             )
         }
         else -> {
@@ -90,6 +98,7 @@ fun MainApp(
                     onMoveToPlanToRead = { bookId -> libraryViewModel.moveToplanToRead(bookId) },
                     onSetProgress = { bookId, progress -> libraryViewModel.setBookProgress(bookId, progress) },
                     onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) },
+                    onUpdateBookSettings = { book -> libraryViewModel.updateBookSettings(book) },
                     libraryManager = libraryViewModel.libraryManager
                 )
                 1 -> RecentsScreen(
@@ -117,7 +126,8 @@ fun MainApp(
                     onMarkCompleted = { bookId -> libraryViewModel.markAsCompleted(bookId) },
                     onMoveToPlanToRead = { bookId -> libraryViewModel.moveToplanToRead(bookId) },
                     onSetProgress = { bookId, progress -> libraryViewModel.setBookProgress(bookId, progress) },
-                    onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) }
+                    onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) },
+                    onUpdateBookSettings = { book -> libraryViewModel.updateBookSettings(book) }
                 )
                 else -> LibraryScreen(
                     selectedTab = selectedTab,
@@ -143,6 +153,7 @@ fun MainApp(
                     onMoveToPlanToRead = { bookId -> libraryViewModel.moveToplanToRead(bookId) },
                     onSetProgress = { bookId, progress -> libraryViewModel.setBookProgress(bookId, progress) },
                     onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) },
+                    onUpdateBookSettings = { book -> libraryViewModel.updateBookSettings(book) },
                     libraryManager = libraryViewModel.libraryManager
                 )
             }

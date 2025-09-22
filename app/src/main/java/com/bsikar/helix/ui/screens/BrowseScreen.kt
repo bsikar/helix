@@ -29,6 +29,7 @@ import com.bsikar.helix.theme.ThemeMode
 import com.bsikar.helix.ui.components.BookCard
 import com.bsikar.helix.ui.components.InfiniteHorizontalBookScroll
 import com.bsikar.helix.ui.components.SearchBar
+import com.bsikar.helix.ui.components.SearchUtils
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,46 +45,85 @@ fun BrowseScreen(
     onMarkCompleted: (String) -> Unit = {},
     onMoveToPlanToRead: (String) -> Unit = {},
     onSetProgress: (String, Float) -> Unit = { _, _ -> },
-    onEditTags: (String, List<String>) -> Unit = { _, _ -> }
+    onEditTags: (String, List<String>) -> Unit = { _, _ -> },
+    onUpdateBookSettings: (com.bsikar.helix.data.Book) -> Unit = { _ -> }
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var selectedTags by remember { mutableStateOf<Set<String>>(emptySet()) }
     var expandedCategory by remember { mutableStateOf<TagCategory?>(null) }
     
-    // Organize books by categories based on tags
-    val featuredBooks = remember(allBooks) {
-        allBooks.filter { book -> 
-            book.hasAnyTag(listOf("shounen", "seinen")) || book.progress > 0.5f
+    // Create mutable internal list to allow book updates
+    // Use a key that includes book properties to detect internal book changes
+    val allBooksKey = allBooks.map { "${it.id}-${it.coverDisplayMode}-${it.userSelectedColor}" }.joinToString(",")
+    var internalAllBooks by remember(allBooksKey) { mutableStateOf(allBooks) }
+    
+    // Function to update a book in the internal list
+    val updateBookInList = { updatedBook: Book ->
+        internalAllBooks = internalAllBooks.map { book ->
+            if (book.id == updatedBook.id) updatedBook else book
+        }
+        
+        // Also call the parent's update function if provided
+        onUpdateBookSettings(updatedBook)
+    }
+    
+    // Organize books by categories - include books without tags
+    val featuredBooks = remember(internalAllBooks) {
+        // Featured: Books with specific tags OR high progress OR recently read
+        internalAllBooks.filter { book -> 
+            book.hasAnyTag(listOf("shounen", "seinen")) || 
+            book.progress > 0.5f ||
+            (book.lastReadTimestamp > System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000)) // Read in last 7 days
         }.take(6)
     }
     
-    val popularBooks = remember(allBooks) {
-        allBooks.filter { book -> 
+    val popularBooks = remember(internalAllBooks) {
+        // Popular: Books with specific tags OR any imported books (to show something)
+        val taggedBooks = internalAllBooks.filter { book -> 
             book.hasAnyTag(listOf("action", "adventure", "fantasy", "supernatural"))
-        }.take(12)
+        }
+        
+        if (taggedBooks.isNotEmpty()) {
+            taggedBooks.take(12)
+        } else {
+            // If no tagged books, show some imported books
+            internalAllBooks.filter { it.isImported }.take(12)
+        }
     }
     
-    val newReleases = remember(allBooks) {
-        allBooks.filter { book -> 
+    val newReleases = remember(internalAllBooks) {
+        // New Releases: Books with specific tags OR recently imported books
+        val taggedBooks = internalAllBooks.filter { book -> 
             book.hasAnyTag(listOf("ongoing", "romance", "comedy"))
-        }.take(6)
+        }
+        
+        if (taggedBooks.isNotEmpty()) {
+            taggedBooks.take(6)
+        } else {
+            // If no tagged books, show recently imported books
+            internalAllBooks.filter { it.isImported }
+                .sortedByDescending { book ->
+                    // Use last read time or a default recent time for newly imported books
+                    maxOf(book.lastReadTimestamp, System.currentTimeMillis() - (30 * 24 * 60 * 60 * 1000))
+                }.take(6)
+        }
     }
 
     // Get all unique tags that exist in the library, organized by all categories
-    val availableTagsByCategory = remember(allBooks) {
-        val allTagsInLibrary = allBooks.flatMap { it.getTagObjects() }.distinctBy { it.id }
+    val availableTagsByCategory = remember(internalAllBooks) {
+        val allTagsInLibrary = internalAllBooks.flatMap { it.getTagObjects() }.distinctBy { it.id }
         TagCategory.values().filter { it != TagCategory.CUSTOM }.associateWith { category ->
             allTagsInLibrary.filter { it.category == category }
         }.filterValues { it.isNotEmpty() }
     }
 
     // Calculate which tags are available given current filter selection
-    val availableTagsForCurrentFilters = remember(allBooks, selectedTags) {
+    val availableTagsForCurrentFilters = remember(internalAllBooks, selectedTags) {
         if (selectedTags.isEmpty()) {
             availableTagsByCategory
         } else {
             // Find books that match current filters
-            val filteredBooks = allBooks.filter { book ->
+            val filteredBooks = internalAllBooks.filter { book ->
                 selectedTags.all { tag -> book.hasTag(tag) }
             }
             
@@ -261,7 +301,8 @@ fun BrowseScreen(
                         onMarkCompleted = onMarkCompleted,
                         onMoveToPlanToRead = onMoveToPlanToRead,
                         onSetProgress = onSetProgress,
-                        onEditTags = onEditTags
+                        onEditTags = onEditTags,
+                        onUpdateBookSettings = updateBookInList
                     )
                 }
             }
@@ -285,7 +326,8 @@ fun BrowseScreen(
                         onMarkCompleted = onMarkCompleted,
                         onMoveToPlanToRead = onMoveToPlanToRead,
                         onSetProgress = onSetProgress,
-                        onEditTags = onEditTags
+                        onEditTags = onEditTags,
+                        onUpdateBookSettings = updateBookInList
                     )
                 }
             }
@@ -309,7 +351,8 @@ fun BrowseScreen(
                         onMarkCompleted = onMarkCompleted,
                         onMoveToPlanToRead = onMoveToPlanToRead,
                         onSetProgress = onSetProgress,
-                        onEditTags = onEditTags
+                        onEditTags = onEditTags,
+                        onUpdateBookSettings = updateBookInList
                     )
                 }
             }
@@ -373,7 +416,8 @@ fun InfiniteHorizontalScroll(
     onMarkCompleted: (String) -> Unit = {},
     onMoveToPlanToRead: (String) -> Unit = {},
     onSetProgress: (String, Float) -> Unit = { _, _ -> },
-    onEditTags: (String, List<String>) -> Unit = { _, _ -> }
+    onEditTags: (String, List<String>) -> Unit = { _, _ -> },
+    onUpdateBookSettings: (com.bsikar.helix.data.Book) -> Unit = { _ -> }
 ) {
     // Use the new circular implementation from BookSection
     InfiniteHorizontalBookScroll(
@@ -387,27 +431,34 @@ fun InfiniteHorizontalScroll(
         onMarkCompleted = onMarkCompleted,
         onMoveToPlanToRead = onMoveToPlanToRead,
         onSetProgress = onSetProgress,
-        onEditTags = onEditTags
+        onEditTags = onEditTags,
+        onUpdateBookSettings = onUpdateBookSettings
     )
 }
 
 // Helper function to filter books by multiple tags
 private fun filterBooksByTags(books: List<Book>, searchQuery: String, selectedTags: Set<String>): List<Book> {
-    return books.filter { book ->
-        val matchesSearch = if (searchQuery.isBlank()) {
-            true
-        } else {
-            book.title.contains(searchQuery, ignoreCase = true) ||
-                    book.author.contains(searchQuery, ignoreCase = true)
-        }
-        
-        val matchesTags = if (selectedTags.isEmpty()) {
-            true
-        } else {
+    // First filter by tags
+    val tagFiltered = if (selectedTags.isEmpty()) {
+        books
+    } else {
+        books.filter { book ->
             selectedTags.all { tag -> book.hasTag(tag) }
         }
-        
-        matchesSearch && matchesTags
+    }
+    
+    // Then apply fuzzy search if query exists
+    return if (searchQuery.isBlank()) {
+        tagFiltered
+    } else {
+        val searchResults = SearchUtils.fuzzySearch(
+            items = tagFiltered,
+            query = searchQuery,
+            getText = { it.title },
+            getSecondaryText = { it.author },
+            threshold = 0.3
+        )
+        searchResults.map { it.item }
     }
 }
 

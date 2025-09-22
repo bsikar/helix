@@ -31,7 +31,7 @@ import com.bsikar.helix.theme.ThemeManager
 import com.bsikar.helix.theme.ThemeMode
 import com.bsikar.helix.ui.components.SearchBar
 import com.bsikar.helix.ui.components.TagEditorDialog
-import com.bsikar.helix.ui.components.HighlightedText
+import com.bsikar.helix.ui.components.SearchUtils
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,19 +54,23 @@ fun RecentsScreen(
     // Filter and sort recent books
     val filteredRecentBooks = remember(searchQuery, sortBy, recentBooks) {
         val filtered = if (searchQuery.isBlank()) {
-            recentBooks
+            recentBooks.map { SearchUtils.SearchResult(it, 1.0) }
         } else {
-            recentBooks.filter { book ->
-                book.title.contains(searchQuery, ignoreCase = true) ||
-                        book.author.contains(searchQuery, ignoreCase = true)
-            }
+            SearchUtils.fuzzySearch(
+                items = recentBooks,
+                query = searchQuery,
+                getText = { it.title },
+                getSecondaryText = { it.author },
+                threshold = 0.3
+            )
         }
         
+        val books = filtered.map { it.item }
         when (sortBy) {
-            "Recent" -> filtered.sortedByDescending { it.lastReadTimestamp }
-            "Title" -> filtered.sortedBy { it.title }
-            "Progress" -> filtered.sortedByDescending { it.progress }
-            else -> filtered
+            "Recent" -> books.sortedByDescending { it.lastReadTimestamp }
+            "Title" -> books.sortedBy { it.title }
+            "Progress" -> books.sortedByDescending { it.progress }
+            else -> books
         }
     }
 
@@ -324,21 +328,33 @@ fun RecentBookItem(
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
                 Column {
-                    HighlightedText(
-                        text = book.title,
-                        searchQuery = searchQuery,
-                        normalColor = theme.primaryTextColor,
-                        highlightColor = theme.accentColor,
+                    Text(
+                        text = SearchUtils.createHighlightedText(
+                            text = book.title,
+                            query = searchQuery,
+                            baseColor = theme.primaryTextColor,
+                            highlightColor = theme.accentColor,
+                            fontSize = 16.sp,
+                            highlightFontWeight = FontWeight.Bold
+                        ),
                         fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
-                    HighlightedText(
-                        text = book.author,
-                        searchQuery = searchQuery,
-                        normalColor = theme.secondaryTextColor,
-                        highlightColor = theme.accentColor,
+                    Text(
+                        text = SearchUtils.createHighlightedText(
+                            text = book.author,
+                            query = searchQuery,
+                            baseColor = theme.secondaryTextColor,
+                            highlightColor = theme.accentColor,
+                            fontSize = 13.sp,
+                            highlightFontWeight = FontWeight.Bold
+                        ),
                         fontSize = 13.sp,
-                        fontWeight = FontWeight.Normal
+                        fontWeight = FontWeight.Normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
                 

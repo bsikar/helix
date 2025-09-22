@@ -17,6 +17,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ProgressIndicatorDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,6 +36,11 @@ import com.bsikar.helix.theme.ThemeManager
 import com.bsikar.helix.theme.ThemeMode
 import kotlinx.coroutines.launch
 import java.io.File
+
+private object SettingsScreenConstants {
+    const val THEME_SECTION_INDEX = 0
+    const val LIBRARY_MANAGEMENT_SECTION_INDEX = 1
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,8 +66,11 @@ fun SettingsScreen(
     // Auto-scroll to specific section when requested
     LaunchedEffect(scrollToSection) {
         if (scrollToSection == "progress" && (importProgress != null || importMessage.isNotEmpty())) {
-            // Scroll to the progress section (item index 2: Library Management section)
-            listState.animateScrollToItem(2)
+            // Calculate the index of the Library Management section dynamically
+            if (libraryManager != null) {
+                // If libraryManager exists, Library Management section is at this index
+                listState.animateScrollToItem(SettingsScreenConstants.LIBRARY_MANAGEMENT_SECTION_INDEX)
+            }
         }
     }
     
@@ -134,7 +144,9 @@ fun SettingsScreen(
             
             // Show import progress
             importProgress?.let { progress ->
-                item {
+                // Only show progress if we have a valid total count
+                if (progress.displayTotal > 0) {
+                    item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = theme.surfaceColor)
@@ -151,10 +163,12 @@ fun SettingsScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 CircularProgressIndicator(
-                                    progress = progress.percentage / 100f,
-                                    modifier = Modifier.size(24.dp),
-                                    color = theme.accentColor,
-                                    strokeWidth = 3.dp
+                                progress = { progress.percentage / 100f },
+                                modifier = Modifier.size(24.dp),
+                                color = theme.accentColor,
+                                strokeWidth = 3.dp,
+                                trackColor = ProgressIndicatorDefaults.circularIndeterminateTrackColor,
+                                strokeCap = ProgressIndicatorDefaults.CircularDeterminateStrokeCap,
                                 )
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
@@ -164,7 +178,7 @@ fun SettingsScreen(
                                         fontWeight = FontWeight.Medium
                                     )
                                     Text(
-                                        text = "${progress.current} of ${progress.total} files",
+                                        text = if (progress.displayTotal > 0) "${progress.displayCurrent} of ${progress.displayTotal} files" else "Preparing...",
                                         color = theme.secondaryTextColor,
                                         fontSize = 12.sp
                                     )
@@ -194,6 +208,7 @@ fun SettingsScreen(
                             }
                         }
                     }
+                    }
                 }
             }
             
@@ -203,7 +218,10 @@ fun SettingsScreen(
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(
-                            containerColor = if (importMessage.contains("successfully")) 
+                            containerColor = if (importMessage.contains("successfully") || 
+                                               importMessage.contains("Found") || 
+                                               importMessage.contains("complete") || 
+                                               importMessage.contains("added to watch list")) 
                                 theme.accentColor.copy(alpha = 0.1f) 
                             else 
                                 Color.Red.copy(alpha = 0.1f)
@@ -214,7 +232,10 @@ fun SettingsScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(16.dp),
-                            color = if (importMessage.contains("successfully")) 
+                            color = if (importMessage.contains("successfully") || 
+                                       importMessage.contains("Found") || 
+                                       importMessage.contains("complete") || 
+                                       importMessage.contains("added to watch list")) 
                                 theme.accentColor 
                             else 
                                 Color.Red,
@@ -230,19 +251,9 @@ fun SettingsScreen(
                     SettingsSection(title = "Watched Directories", theme = theme) {
                         WatchedDirectoriesView(
                             libraryManager = libraryManager,
-                            theme = theme
-                        )
-                    }
-                }
-            }
-            
-            // Individual Import Files Section
-            if (libraryManager != null) {
-                item {
-                    SettingsSection(title = "Individual Imports", theme = theme) {
-                        IndividualImportsView(
-                            libraryManager = libraryManager,
-                            theme = theme
+                            theme = theme,
+                            importMessage = importMessage,
+                            onMessageChange = { importMessage = it }
                         )
                     }
                 }
@@ -334,9 +345,13 @@ fun ThemeSelector(
 @Composable
 fun WatchedDirectoriesView(
     libraryManager: LibraryManager,
-    theme: AppTheme
+    theme: AppTheme,
+    importMessage: String,
+    onMessageChange: (String) -> Unit
 ) {
     val watchedDirectories by libraryManager.watchedDirectories
+    val isLoading by libraryManager.isLoading
+    val importProgress by libraryManager.importProgress
     
     Column(
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -355,8 +370,13 @@ fun WatchedDirectoriesView(
             
             TextButton(
                 onClick = { 
+                    onMessageChange("") // Clear any existing messages
                     libraryManager.rescanWatchedDirectoriesAsync { success, message, count ->
-                        // Result will be shown in scan status
+                        onMessageChange(if (success) {
+                            if (count > 0) "Found $count new books!" else "Rescan complete - no new books found"
+                        } else {
+                            "Rescan failed: $message"
+                        })
                     }
                 }
             ) {
@@ -402,9 +422,28 @@ fun WatchedDirectoriesView(
                                 color = theme.secondaryTextColor
                             )
                             Text(
-                                text = "Last scanned: ${formatTimestamp(dir.lastScanned)}",
+                                text = when {
+                                    isLoading && importProgress != null && dir.requiresRescan -> {
+                                        "Scanning... ${importProgress?.currentFile ?: "files"}"
+                                    }
+                                    dir.requiresRescan -> {
+                                        "Requires rescan"
+                                    }
+                                    else -> {
+                                        "Last scanned: ${formatTimestamp(dir.lastScanned)}"
+                                    }
+                                },
                                 fontSize = 10.sp,
-                                color = theme.secondaryTextColor
+                                color = when {
+                                    isLoading && importProgress != null && dir.requiresRescan -> theme.accentColor
+                                    dir.requiresRescan -> theme.accentColor
+                                    else -> theme.secondaryTextColor
+                                },
+                                fontWeight = when {
+                                    isLoading && importProgress != null && dir.requiresRescan -> FontWeight.Medium
+                                    dir.requiresRescan -> FontWeight.Medium
+                                    else -> FontWeight.Normal
+                                }
                             )
                         }
                         IconButton(
@@ -423,7 +462,7 @@ fun WatchedDirectoriesView(
             }
         } else {
             Text(
-                text = "No watched directories. Import from a directory to add one.",
+                text = "No watched directories. Add a directory to watch for EPUB files.",
                 fontSize = 12.sp,
                 color = theme.secondaryTextColor,
                 style = androidx.compose.ui.text.TextStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
@@ -432,72 +471,6 @@ fun WatchedDirectoriesView(
     }
 }
 
-@Composable
-fun IndividualImportsView(
-    libraryManager: LibraryManager,
-    theme: AppTheme
-) {
-    val importedFiles by libraryManager.importedFiles
-    val books by libraryManager.books
-    
-    // Filter to show only individual file imports (not from directories)
-    val individualFiles = importedFiles.filter { file ->
-        // A file is considered individual if it's not part of a watched directory
-        val watchedDirs = libraryManager.watchedDirectories.value
-        watchedDirs.none { dir -> file.path.contains(dir.path, ignoreCase = true) }
-    }
-    
-    Column(
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text(
-            text = "${individualFiles.size} individual files imported",
-            fontSize = 14.sp,
-            color = theme.primaryTextColor
-        )
-        
-        if (individualFiles.isNotEmpty()) {
-            individualFiles.takeLast(5).forEach { file ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = theme.backgroundColor.copy(alpha = 0.5f))
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp)
-                    ) {
-                        Text(
-                            text = File(file.path).name,
-                            fontSize = 12.sp,
-                            color = theme.primaryTextColor,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = "Imported: ${formatTimestamp(file.importedAt)}",
-                            fontSize = 10.sp,
-                            color = theme.secondaryTextColor
-                        )
-                    }
-                }
-            }
-            
-            if (individualFiles.size > 5) {
-                Text(
-                    text = "... and ${individualFiles.size - 5} more files",
-                    fontSize = 10.sp,
-                    color = theme.secondaryTextColor,
-                    style = androidx.compose.ui.text.TextStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
-                )
-            }
-        } else {
-            Text(
-                text = "No individual files imported. Use 'Import EPUB File' to add individual files.",
-                fontSize = 12.sp,
-                color = theme.secondaryTextColor,
-                style = androidx.compose.ui.text.TextStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
-            )
-        }
-    }
-}
 
 @Composable
 fun LibrarySummaryView(
@@ -533,7 +506,7 @@ fun LibrarySummaryView(
             )
         }
         
-        Divider(color = theme.secondaryTextColor.copy(alpha = 0.2f))
+        HorizontalDivider(color = theme.secondaryTextColor.copy(alpha = 0.2f))
         
         // Reading status breakdown
         listOf(
@@ -558,7 +531,7 @@ fun LibrarySummaryView(
             }
         }
         
-        Divider(color = theme.secondaryTextColor.copy(alpha = 0.2f))
+        HorizontalDivider(color = theme.secondaryTextColor.copy(alpha = 0.2f))
         
         // Source breakdown
         Row(
@@ -638,10 +611,9 @@ fun LibraryManagementOptions(
                     }
                     
                     libraryManager.importEpubFileAsync(file) { success, message ->
+                        file.delete() // Clean up temp file after async operation completes
                         onImportComplete(success, message)
                     }
-                    
-                    file.delete() // Clean up temp file
                 } catch (e: Exception) {
                     onImportComplete(false, "Error importing EPUB: ${e.message}")
                 }
@@ -649,13 +621,22 @@ fun LibraryManagementOptions(
         }
     }
     
-    // Directory picker for bulk import
+    // Directory picker for adding to watch list
     val directoryPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri: Uri? ->
         uri?.let {
-            onImportStart()
-            libraryManager.importEpubsFromDirectoryAsync(uri.toString(), context) { success, message ->
+            // Take persistent permission to access this directory
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            } catch (e: Exception) {
+                // Permission might already be taken or not available
+            }
+            
+            libraryManager.addDirectoryToWatchListAsync(uri.toString(), context) { success, message ->
                 onImportComplete(success, message)
             }
         }
@@ -678,33 +659,16 @@ fun LibraryManagementOptions(
             }
         )
         
-        // Import from directory
+        // Add directory to watch list
         SettingsActionItem(
-            title = "Import from Directory",
-            subtitle = "Import multiple EPUB files from a folder",
+            title = "Add Directory to Watch",
+            subtitle = "Add a folder to scan for EPUB files (requires rescan)",
             icon = Icons.Filled.FolderOpen,
             theme = theme,
             enabled = !isLoading,
             onClick = { 
                 if (!isLoading) {
                     directoryPicker.launch(null)
-                }
-            }
-        )
-        
-        // Add fake data for testing
-        SettingsActionItem(
-            title = "Import Fake Data",
-            subtitle = "Add sample books for testing",
-            icon = Icons.AutoMirrored.Filled.LibraryBooks,
-            theme = theme,
-            enabled = !isLoading,
-            onClick = {
-                if (!isLoading) {
-                    onImportStart()
-                    libraryManager.addFakeDataAsync { success, message ->
-                        onImportComplete(success, message)
-                    }
                 }
             }
         )

@@ -19,8 +19,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bsikar.helix.data.Book
 import com.bsikar.helix.data.ReadingStatus
+import com.bsikar.helix.data.CoverDisplayMode
 import com.bsikar.helix.theme.AppTheme
-import com.bsikar.helix.ui.components.HighlightedText
+import com.bsikar.helix.ui.components.SearchUtils
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -34,10 +35,12 @@ fun BookCard(
     onMarkCompleted: (String) -> Unit = {},
     onMoveToPlanToRead: (String) -> Unit = {},
     onSetProgress: (String, Float) -> Unit = { _, _ -> },
-    onEditTags: (String, List<String>) -> Unit = { _, _ -> }
+    onEditTags: (String, List<String>) -> Unit = { _, _ -> },
+    onUpdateBookSettings: (Book) -> Unit = { _ -> }
 ) {
     var showContextMenu by remember { mutableStateOf(false) }
     var showTagEditor by remember { mutableStateOf(false) }
+    var showBookSettings by remember { mutableStateOf(false) }
     
     Column(
         modifier = Modifier
@@ -51,8 +54,9 @@ fun BookCard(
             modifier = Modifier
                 .aspectRatio(0.68f)
                 .clip(RoundedCornerShape(8.dp))
-                .background(book.coverColorComposeColor)
+                .background(book.getEffectiveCoverColor())
         ) {
+            // TODO: Add actual cover art image display when shouldShowCoverArt() is true
             // Status indicator in top-right corner
             val statusColor = when (book.readingStatus) {
                 ReadingStatus.PLAN_TO_READ -> theme.secondaryTextColor.copy(alpha = 0.7f)
@@ -106,24 +110,36 @@ fun BookCard(
         
         Spacer(modifier = Modifier.height(8.dp))
         
-        HighlightedText(
-            text = book.title,
-            searchQuery = searchQuery,
-            normalColor = theme.primaryTextColor,
-            highlightColor = theme.accentColor,
+        Text(
+            text = SearchUtils.createHighlightedText(
+                text = book.title,
+                query = searchQuery,
+                baseColor = theme.primaryTextColor,
+                highlightColor = theme.accentColor,
+                fontSize = 13.sp,
+                highlightFontWeight = FontWeight.Bold
+            ),
             fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
         )
         
         Spacer(modifier = Modifier.height(2.dp))
         
-        HighlightedText(
-            text = book.author,
-            searchQuery = searchQuery,
-            normalColor = theme.secondaryTextColor,
-            highlightColor = theme.accentColor,
+        Text(
+            text = SearchUtils.createHighlightedText(
+                text = book.author,
+                query = searchQuery,
+                baseColor = theme.secondaryTextColor,
+                highlightColor = theme.accentColor,
+                fontSize = 11.sp,
+                highlightFontWeight = FontWeight.Bold
+            ),
             fontSize = 11.sp,
-            fontWeight = FontWeight.Normal
+            fontWeight = FontWeight.Normal,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
         )
         
         if (showContextMenu) {
@@ -256,6 +272,27 @@ fun BookCard(
                         )
                     }
                 )
+                
+                // Add "Book Settings" option for all books
+                DropdownMenuItem(
+                    text = { 
+                        Text(
+                            "Book Settings",
+                            color = theme.primaryTextColor
+                        )
+                    },
+                    onClick = {
+                        showBookSettings = true
+                        showContextMenu = false
+                    },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Filled.Settings,
+                            contentDescription = null,
+                            tint = theme.accentColor
+                        )
+                    }
+                )
             }
         }
     }
@@ -268,6 +305,31 @@ fun BookCard(
             onDismiss = { showTagEditor = false },
             onTagsUpdated = { newTags ->
                 onEditTags(book.id, newTags)
+            }
+        )
+    }
+    
+    // Book Settings Dialog
+    if (showBookSettings) {
+        BookSettingsDialog(
+            book = book,
+            theme = theme,
+            onDismiss = { showBookSettings = false },
+            onSaveSettings = { metadataUpdate ->
+                val colorValue = metadataUpdate.userSelectedColor?.value?.toLong()
+                val updatedBook = book.copy(
+                    title = metadataUpdate.title,
+                    author = metadataUpdate.author,
+                    description = metadataUpdate.description,
+                    publisher = metadataUpdate.publisher,
+                    language = metadataUpdate.language,
+                    isbn = metadataUpdate.isbn,
+                    publishedDate = metadataUpdate.publishedDate,
+                    coverDisplayMode = metadataUpdate.coverDisplayMode,
+                    userSelectedColor = colorValue,
+                    userEditedMetadata = true
+                )
+                onUpdateBookSettings(updatedBook)
             }
         )
     }

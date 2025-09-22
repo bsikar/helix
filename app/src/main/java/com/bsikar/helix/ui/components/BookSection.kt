@@ -37,7 +37,8 @@ fun BookSection(
     onMarkCompleted: (String) -> Unit = {},
     onMoveToPlanToRead: (String) -> Unit = {},
     onSetProgress: (String, Float) -> Unit = { _, _ -> },
-    onEditTags: (String, List<String>) -> Unit = { _, _ -> }
+    onEditTags: (String, List<String>) -> Unit = { _, _ -> },
+    onUpdateBookSettings: (com.bsikar.helix.data.Book) -> Unit = { _ -> }
 ) {
     Column {
         Row(
@@ -91,7 +92,8 @@ fun BookSection(
                 onMarkCompleted = onMarkCompleted,
                 onMoveToPlanToRead = onMoveToPlanToRead,
                 onSetProgress = onSetProgress,
-                onEditTags = onEditTags
+                onEditTags = onEditTags,
+                onUpdateBookSettings = onUpdateBookSettings
             )
         } else {
             LazyVerticalGrid(
@@ -111,7 +113,8 @@ fun BookSection(
                         onMarkCompleted = onMarkCompleted,
                         onMoveToPlanToRead = onMoveToPlanToRead,
                         onSetProgress = onSetProgress,
-                        onEditTags = onEditTags
+                        onEditTags = onEditTags,
+                        onUpdateBookSettings = onUpdateBookSettings
                     )
                 }
             }
@@ -174,7 +177,8 @@ fun InfiniteHorizontalBookScroll(
     onMarkCompleted: (String) -> Unit = {},
     onMoveToPlanToRead: (String) -> Unit = {},
     onSetProgress: (String, Float) -> Unit = { _, _ -> },
-    onEditTags: (String, List<String>) -> Unit = { _, _ -> }
+    onEditTags: (String, List<String>) -> Unit = { _, _ -> },
+    onUpdateBookSettings: (com.bsikar.helix.data.Book) -> Unit = { _ -> }
 ) {
     if (books.isEmpty()) return
     
@@ -194,7 +198,10 @@ fun InfiniteHorizontalBookScroll(
             contentPadding = contentPadding,
             modifier = modifier
         ) {
-            items(books) { book ->
+            items(
+                items = books,
+                key = { book -> book.id }
+            ) { book ->
                 BookCard(
                     book = book,
                     showProgress = showProgress,
@@ -205,7 +212,8 @@ fun InfiniteHorizontalBookScroll(
                     onMarkCompleted = onMarkCompleted,
                     onMoveToPlanToRead = onMoveToPlanToRead,
                     onSetProgress = onSetProgress,
-                    onEditTags = onEditTags
+                    onEditTags = onEditTags,
+                    onUpdateBookSettings = onUpdateBookSettings
                 )
             }
         }
@@ -230,29 +238,40 @@ fun InfiniteHorizontalBookScroll(
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
     val coroutineScope = rememberCoroutineScope()
     
-    // Monitor scroll position and reset when approaching boundaries
+    // Simplified scroll management to avoid measurement issues
+    // Only reset position when significantly far from center to avoid rapid jumps
     LaunchedEffect(listState) {
         snapshotFlow { listState.firstVisibleItemIndex }
             .collect { firstVisibleItemIndex ->
-                val threshold = books.size * 2 // Reset when within 2 cycles of boundary
+                val threshold = books.size * 3 // Increased threshold for stability
+                val centerStart = books.size * 4 // Safe center position
                 
+                // Only jump when really close to boundaries and not during rapid scrolling
                 when {
-                    // Approaching the end - jump back to safe middle position
                     firstVisibleItemIndex >= repeatedBooks.size - threshold -> {
                         val cyclePosition = firstVisibleItemIndex % books.size
-                        val safeCycles = booksVisibleOnScreen / books.size + 1
-                        val newIndex = books.size * safeCycles + cyclePosition
-                        coroutineScope.launch {
-                            listState.scrollToItem(newIndex)
+                        val newIndex = centerStart + cyclePosition
+                        if (newIndex < repeatedBooks.size - threshold) {
+                            coroutineScope.launch {
+                                try {
+                                    listState.scrollToItem(newIndex)
+                                } catch (e: Exception) {
+                                    // Ignore scroll errors during rapid state changes
+                                }
+                            }
                         }
                     }
-                    // Approaching the beginning - jump forward to safe middle position  
                     firstVisibleItemIndex <= threshold -> {
                         val cyclePosition = firstVisibleItemIndex % books.size
-                        val safeCycles = booksVisibleOnScreen / books.size + 1
-                        val newIndex = books.size * safeCycles + cyclePosition
-                        coroutineScope.launch {
-                            listState.scrollToItem(newIndex)
+                        val newIndex = centerStart + cyclePosition
+                        if (newIndex >= threshold) {
+                            coroutineScope.launch {
+                                try {
+                                    listState.scrollToItem(newIndex)
+                                } catch (e: Exception) {
+                                    // Ignore scroll errors during rapid state changes
+                                }
+                            }
                         }
                     }
                 }
@@ -267,7 +286,7 @@ fun InfiniteHorizontalBookScroll(
     ) {
         items(
             count = repeatedBooks.size,
-            key = { index -> "${books[index % books.size].title}_$index" }
+            key = { index -> "${books[index % books.size].id}_$index" }
         ) { index ->
             val book = repeatedBooks[index]
             BookCard(
@@ -280,7 +299,8 @@ fun InfiniteHorizontalBookScroll(
                 onMarkCompleted = onMarkCompleted,
                 onMoveToPlanToRead = onMoveToPlanToRead,
                 onSetProgress = onSetProgress,
-                onEditTags = onEditTags
+                onEditTags = onEditTags,
+                onUpdateBookSettings = onUpdateBookSettings
             )
         }
     }
