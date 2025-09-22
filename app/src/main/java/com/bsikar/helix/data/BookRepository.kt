@@ -11,7 +11,7 @@ object BookRepository {
             Book(
                 title = "Akane-Banashi",
                 author = "Yuki Suenaga",
-                coverColor = Color(0xFF4169E1),
+                coverColor = 0xFF4169E1,
                 progress = 0f,
                 tags = listOf("shounen", "drama", "slice-of-life", "ongoing", "manga"),
                 originalMetadataTags = listOf("Shounen", "Drama", "Traditional Arts", "Rakugo")
@@ -19,7 +19,7 @@ object BookRepository {
             Book(
                 title = "Dandadan",
                 author = "Yukinobu Tatsu",
-                coverColor = Color(0xFF32CD32),
+                coverColor = 0xFF32CD32,
                 progress = 0f,
                 tags = listOf("shounen", "supernatural", "comedy", "romance", "ongoing", "manga"),
                 originalMetadataTags = listOf("Supernatural", "Comedy", "School", "Aliens", "Ghosts")
@@ -27,204 +27,162 @@ object BookRepository {
             Book(
                 title = "Jujutsu Kaisen",
                 author = "Gege Akutami",
-                coverColor = Color(0xFF8A2BE2),
+                coverColor = 0xFF8A2BE2,
                 progress = 0f,
-                tags = listOf("shounen", "supernatural", "action", "school", "completed", "manga"),
-                originalMetadataTags = listOf("Dark Fantasy", "Supernatural", "Action", "School")
+                tags = listOf("shounen", "action", "supernatural", "completed", "manga"),
+                originalMetadataTags = listOf("Supernatural", "School", "Action", "Curses")
             ),
+            Book(
+                title = "Tokyo Ghoul",
+                author = "Sui Ishida",
+                coverColor = 0xFF696969,
+                progress = 0f,
+                tags = listOf("seinen", "supernatural", "dark", "completed", "manga"),
+                originalMetadataTags = listOf("Dark Fantasy", "Supernatural", "Horror", "Tragedy")
+            ),
+            Book(
+                title = "Monster",
+                author = "Naoki Urasawa",
+                coverColor = 0xFF8B0000,
+                progress = 0f,
+                tags = listOf("seinen", "thriller", "psychological", "completed", "manga"),
+                originalMetadataTags = listOf("Psychological", "Thriller", "Mystery", "Medical")
+            ),
+            Book(
+                title = "20th Century Boys",
+                author = "Naoki Urasawa",
+                coverColor = 0xFF4682B4,
+                progress = 0f,
+                tags = listOf("seinen", "mystery", "thriller", "completed", "manga"),
+                originalMetadataTags = listOf("Mystery", "Sci-Fi", "Thriller", "Friendship")
+            ),
+            Book(
+                title = "Pluto",
+                author = "Naoki Urasawa",
+                coverColor = 0xFF2F4F4F,
+                progress = 0f,
+                tags = listOf("seinen", "sci-fi", "mystery", "completed", "manga"),
+                originalMetadataTags = listOf("Sci-Fi", "Mystery", "Robots", "Philosophy")
+            ),
+            
+            // Currently Reading Books (0 < progress < 1)
             Book(
                 title = "Chainsaw Man",
                 author = "Tatsuki Fujimoto",
-                coverColor = Color(0xFFFF4500),
-                progress = 0f,
-                tags = listOf("shounen", "horror", "action", "supernatural", "completed", "manga"),
-                originalMetadataTags = listOf("Horror", "Dark", "Gore", "Devils", "Action")
+                coverColor = 0xFFDC143C,
+                progress = 0.45f,
+                lastReadTimestamp = System.currentTimeMillis() - (2 * 24 * 60 * 60 * 1000), // 2 days ago
+                tags = listOf("shounen", "action", "supernatural", "ongoing", "manga"),
+                originalMetadataTags = listOf("Action", "Supernatural", "Gore", "Dark Comedy")
             ),
             Book(
-                title = "One Punch Man",
-                author = "ONE",
-                coverColor = Color(0xFFD4AF37),
-                progress = 0f,
-                tags = listOf("seinen", "comedy", "action", "superhero", "ongoing", "manga"),
-                originalMetadataTags = listOf("Superhero", "Parody", "Comedy", "Action")
+                title = "One Piece",
+                author = "Eiichiro Oda",
+                coverColor = 0xFFFF6347,
+                progress = 0.72f,
+                lastReadTimestamp = System.currentTimeMillis() - (5 * 24 * 60 * 60 * 1000), // 5 days ago
+                tags = listOf("shounen", "adventure", "action", "ongoing", "manga"),
+                originalMetadataTags = listOf("Adventure", "Friendship", "Pirates", "Comedy")
             ),
             Book(
-                title = "Vinland Saga",
-                author = "Makoto Yukimura",
-                coverColor = Color(0xFFC0C0C0),
-                progress = 0f,
-                tags = listOf("seinen", "historical", "drama", "adventure", "ongoing", "manga"),
-                originalMetadataTags = listOf("Historical", "Vikings", "War", "Drama", "Mature")
+                title = "Berserk",
+                author = "Kentaro Miura",
+                coverColor = 0xFF800080,
+                progress = 0.38f,
+                lastReadTimestamp = System.currentTimeMillis() - (1 * 24 * 60 * 60 * 1000), // 1 day ago
+                tags = listOf("seinen", "dark-fantasy", "action", "ongoing", "manga"),
+                originalMetadataTags = listOf("Dark Fantasy", "Medieval", "Action", "Mature")
             ),
             Book(
-                title = "Kaguya-sama",
-                author = "Aka Akasaka",
-                coverColor = Color(0xFFFF69B4),
-                progress = 0f,
-                tags = listOf("seinen", "romance", "comedy", "school", "completed", "manga"),
-                originalMetadataTags = listOf("Romance", "Comedy", "Psychological", "School")
-            ),
-            // More Manga with tags
-            Book(
-                title = "Dr. Stone",
-                author = "Riichiro Inagaki",
-                coverColor = Color(0xFF00CED1),
-                progress = 0f,
-                tags = listOf("shounen", "sci-fi", "adventure", "comedy", "ongoing", "manga"),
-                originalMetadataTags = listOf("Science Fiction", "Post-Apocalyptic", "Comedy", "Educational")
+                title = "Vagabond",
+                author = "Takehiko Inoue",
+                coverColor = 0xFF8B4513,
+                progress = 0.61f,
+                lastReadTimestamp = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000), // 1 week ago
+                tags = listOf("seinen", "historical", "action", "martial-arts", "hiatus", "manga"),
+                originalMetadataTags = listOf("Historical", "Samurai", "Martial Arts", "Philosophy")
             ),
             Book(
                 title = "Attack on Titan",
                 author = "Hajime Isayama",
-                coverColor = Color(0xFF8B4513),
-                progress = 0f,
-                tags = listOf("shounen", "action", "drama", "military", "completed", "manga"),
-                originalMetadataTags = listOf("Dark Fantasy", "Military", "Political", "Titans")
+                coverColor = 0xFF8FBC8F,
+                progress = 0.89f,
+                lastReadTimestamp = System.currentTimeMillis() - (3 * 24 * 60 * 60 * 1000), // 3 days ago
+                tags = listOf("shounen", "action", "drama", "completed", "manga"),
+                originalMetadataTags = listOf("Action", "Drama", "Military", "Titans")
             ),
+            
+            // Completed Books (progress = 1.0)
             Book(
                 title = "Death Note",
                 author = "Tsugumi Ohba",
-                coverColor = Color(0xFF000000),
-                progress = 0f,
-                tags = listOf("shounen", "thriller", "supernatural", "psychological", "completed", "manga"),
-                originalMetadataTags = listOf("Psychological", "Supernatural", "Crime", "Thriller")
+                coverColor = 0xFF000000,
+                progress = 1.0f,
+                lastReadTimestamp = System.currentTimeMillis() - (14 * 24 * 60 * 60 * 1000), // 2 weeks ago
+                tags = listOf("shounen", "psychological", "thriller", "completed", "manga"),
+                originalMetadataTags = listOf("Psychological", "Supernatural", "Crime", "Justice")
             ),
             Book(
-                title = "My Hero Academia",
-                author = "Kohei Horikoshi",
-                coverColor = Color(0xFF32CD32),
-                progress = 0f,
-                tags = listOf("shounen", "superhero", "action", "school", "ongoing", "manga"),
-                originalMetadataTags = listOf("Superhero", "School", "Coming of Age", "Quirks")
-            ),
-            
-            // Korean Manhwa
-            Book(
-                title = "Solo Leveling",
-                author = "Chugong",
-                coverColor = Color(0xFF9400D3),
-                progress = 0f,
-                tags = listOf("action", "fantasy", "adventure", "completed", "manhwa"),
-                originalMetadataTags = listOf("Leveling System", "Dungeons", "Monsters", "OP MC")
+                title = "Fullmetal Alchemist",
+                author = "Hiromu Arakawa",
+                coverColor = 0xFFB8860B,
+                progress = 1.0f,
+                lastReadTimestamp = System.currentTimeMillis() - (30 * 24 * 60 * 60 * 1000), // 1 month ago
+                tags = listOf("shounen", "adventure", "action", "completed", "manga"),
+                originalMetadataTags = listOf("Adventure", "Military", "Alchemy", "Brotherhood")
             ),
             Book(
-                title = "Tower of God",
-                author = "SIU",
-                coverColor = Color(0xFF2E8B57),
-                progress = 0f,
-                tags = listOf("action", "adventure", "fantasy", "mystery", "ongoing", "manhwa"),
-                originalMetadataTags = listOf("Tower", "Climbing", "Complex Plot", "Friendship")
+                title = "Hunter x Hunter",
+                author = "Yoshihiro Togashi",
+                coverColor = 0xFF228B22,
+                progress = 1.0f,
+                lastReadTimestamp = System.currentTimeMillis() - (21 * 24 * 60 * 60 * 1000), // 3 weeks ago
+                tags = listOf("shounen", "adventure", "action", "hiatus", "manga"),
+                originalMetadataTags = listOf("Adventure", "Supernatural", "Strategic", "Complex")
             ),
             Book(
-                title = "The God of High School",
-                author = "Yongje Park",
-                coverColor = Color(0xFFFF6347),
-                progress = 0f,
-                tags = listOf("action", "martial-arts", "supernatural", "competition", "completed", "manhwa"),
-                originalMetadataTags = listOf("Martial Arts", "Tournament", "Gods", "High School")
+                title = "Spirited Away",
+                author = "Hayao Miyazaki",
+                coverColor = 0xFF9370DB,
+                progress = 1.0f,
+                lastReadTimestamp = System.currentTimeMillis() - (45 * 24 * 60 * 60 * 1000), // 1.5 months ago
+                tags = listOf("family", "fantasy", "adventure", "completed", "manga"),
+                originalMetadataTags = listOf("Fantasy", "Family", "Magic", "Coming of Age")
             ),
             Book(
-                title = "Noblesse",
-                author = "Son Jeho",
-                coverColor = Color(0xFF8B0000),
-                progress = 0f,
-                tags = listOf("action", "supernatural", "vampire", "school", "completed", "manhwa"),
-                originalMetadataTags = listOf("Vampires", "Nobles", "Modern Day", "School Life")
+                title = "Your Name",
+                author = "Makoto Shinkai",
+                coverColor = 0xFFFF69B4,
+                progress = 1.0f,
+                lastReadTimestamp = System.currentTimeMillis() - (60 * 24 * 60 * 60 * 1000), // 2 months ago
+                tags = listOf("romance", "supernatural", "drama", "completed", "manga"),
+                originalMetadataTags = listOf("Romance", "Time Travel", "Drama", "Slice of Life")
             ),
             Book(
-                title = "Hardcore Leveling Warrior",
-                author = "Sehoon Kim",
-                coverColor = Color(0xFF4B0082),
-                progress = 0f,
-                tags = listOf("action", "gaming", "fantasy", "comedy", "ongoing", "manhwa"),
-                originalMetadataTags = listOf("Virtual Reality", "Gaming", "Redemption", "Competition")
-            ),
-            
-            // Chinese Manhua
-            Book(
-                title = "Tales of Demons and Gods",
-                author = "Mad Snail",
-                coverColor = Color(0xFFFF4500),
-                progress = 0f,
-                tags = listOf("action", "fantasy", "cultivation", "reincarnation", "ongoing", "manhua"),
-                originalMetadataTags = listOf("Cultivation", "Reincarnation", "Demons", "Gods", "Xianxia")
+                title = "Akira",
+                author = "Katsuhiro Otomo",
+                coverColor = 0xFF483D8B,
+                progress = 1.0f,
+                lastReadTimestamp = System.currentTimeMillis() - (90 * 24 * 60 * 60 * 1000), // 3 months ago
+                tags = listOf("seinen", "sci-fi", "action", "completed", "manga"),
+                originalMetadataTags = listOf("Cyberpunk", "Post-Apocalyptic", "Psychic Powers", "Classic")
             ),
             Book(
-                title = "Battle Through the Heavens",
-                author = "Tiancan Tudou",
-                coverColor = Color(0xFFDC143C),
-                progress = 0f,
-                tags = listOf("action", "fantasy", "cultivation", "romance", "ongoing", "manhua"),
-                originalMetadataTags = listOf("Cultivation", "Alchemy", "Romance", "Revenge")
-            ),
-            Book(
-                title = "Martial Peak",
-                author = "Momo",
-                coverColor = Color(0xFF228B22),
-                progress = 0f,
-                tags = listOf("action", "fantasy", "cultivation", "martial-arts", "ongoing", "manhua"),
-                originalMetadataTags = listOf("Martial Arts", "Cultivation", "Peak", "Journey")
-            ),
-            
-            // Web Comics/Webtoons
-            Book(
-                title = "UnOrdinary",
-                author = "uru-chan",
-                coverColor = Color(0xFF9932CC),
-                progress = 0f,
-                tags = listOf("action", "school", "superhero", "drama", "ongoing", "webtoon"),
-                originalMetadataTags = listOf("School", "Superpowers", "Hierarchy", "Social Commentary")
-            ),
-            Book(
-                title = "Lore Olympus",
-                author = "Rachel Smythe",
-                coverColor = Color(0xFFFF69B4),
-                progress = 0f,
-                tags = listOf("romance", "fantasy", "mythology", "drama", "ongoing", "webtoon"),
-                originalMetadataTags = listOf("Greek Mythology", "Romance", "Modern Retelling", "Hades")
-            ),
-            Book(
-                title = "Castle Swimmer",
-                author = "Wendy Lian Martin",
-                coverColor = Color(0xFF00CED1),
-                progress = 0f,
-                tags = listOf("fantasy", "adventure", "lgbtq", "romance", "ongoing", "webtoon"),
-                originalMetadataTags = listOf("Underwater", "Prophecy", "LGBT", "Adventure")
-            ),
-            
-            // Light Novels
-            Book(
-                title = "That Time I Got Reincarnated as a Slime",
-                author = "Fuse",
-                coverColor = Color(0xFF32CD32),
-                progress = 0f,
-                tags = listOf("fantasy", "isekai", "comedy", "adventure", "ongoing", "light-novel"),
-                originalMetadataTags = listOf("Isekai", "Reincarnation", "Slime", "Nation Building")
-            ),
-            Book(
-                title = "Overlord",
-                author = "Kugane Maruyama",
-                coverColor = Color(0xFF2F4F4F),
-                progress = 0f,
-                tags = listOf("fantasy", "isekai", "dark", "adventure", "ongoing", "light-novel"),
-                originalMetadataTags = listOf("Isekai", "VRMMO", "Undead", "World Domination")
+                title = "Ghost in the Shell",
+                author = "Masamune Shirow",
+                coverColor = 0xFF708090,
+                progress = 1.0f,
+                lastReadTimestamp = System.currentTimeMillis() - (120 * 24 * 60 * 60 * 1000), // 4 months ago
+                tags = listOf("seinen", "sci-fi", "action", "completed", "manga"),
+                originalMetadataTags = listOf("Cyberpunk", "Philosophy", "AI", "Technology")
             )
         )
     }
-
-    fun getReadingBooks(): List<Book> = getAllBooks().filter { 
-        it.readingStatus == ReadingStatus.READING 
-    }.sortedByDescending { it.lastReadTimestamp }
-
-    fun getPlanToReadBooks(): List<Book> = getAllBooks().filter { 
-        it.readingStatus == ReadingStatus.PLAN_TO_READ 
-    }.sortedBy { it.title }
-
-    fun getCompletedBooks(): List<Book> = getAllBooks().filter { 
-        it.readingStatus == ReadingStatus.COMPLETED 
-    }.sortedBy { it.title }
-
-    fun getRecentBooks(): List<Book> = getAllBooks().filter { 
-        it.lastReadTimestamp > 0 
-    }.sortedByDescending { it.lastReadTimestamp }
+    
+    fun getRecentBooks(): List<Book> {
+        return getAllBooks()
+            .filter { it.lastReadTimestamp > 0 }
+            .sortedByDescending { it.lastReadTimestamp }
+            .take(10) // Recent 10 books
+    }
 }

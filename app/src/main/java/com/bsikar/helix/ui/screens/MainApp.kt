@@ -17,6 +17,7 @@ fun MainApp(
 ) {
     var selectedTab by remember { mutableStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
+    var settingsScrollTarget by remember { mutableStateOf<String?>(null) }
     var currentBook by remember { mutableStateOf<Book?>(null) }
     var seeAllData by remember { mutableStateOf<Pair<String, List<Book>>?>(null) }
 
@@ -33,7 +34,12 @@ fun MainApp(
                 currentTheme = currentTheme,
                 onThemeChange = onThemeChange,
                 theme = theme,
-                onBackClick = { showSettings = false }
+                onBackClick = { 
+                    showSettings = false
+                    settingsScrollTarget = null
+                },
+                libraryManager = libraryViewModel.libraryManager,
+                scrollToSection = settingsScrollTarget
             )
         }
         seeAllData != null -> {
@@ -69,14 +75,22 @@ fun MainApp(
                     readingBooks = readingBooks,
                     planToReadBooks = planToReadBooks,
                     completedBooks = completedBooks,
-                    onNavigateToSettings = { showSettings = true },
+                    onNavigateToSettings = { 
+                        showSettings = true
+                        settingsScrollTarget = null
+                    },
+                    onNavigateToProgressSettings = {
+                        showSettings = true
+                        settingsScrollTarget = "progress"
+                    },
                     onBookClick = { book -> currentBook = book },
                     onSeeAllClick = { title, books -> seeAllData = title to books },
                     onStartReading = { bookId -> libraryViewModel.startReading(bookId) },
                     onMarkCompleted = { bookId -> libraryViewModel.markAsCompleted(bookId) },
                     onMoveToPlanToRead = { bookId -> libraryViewModel.moveToplanToRead(bookId) },
                     onSetProgress = { bookId, progress -> libraryViewModel.setBookProgress(bookId, progress) },
-                    onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) }
+                    onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) },
+                    libraryManager = libraryViewModel.libraryManager
                 )
                 1 -> RecentsScreen(
                     selectedTab = selectedTab,
@@ -114,14 +128,22 @@ fun MainApp(
                     readingBooks = readingBooks,
                     planToReadBooks = planToReadBooks,
                     completedBooks = completedBooks,
-                    onNavigateToSettings = { showSettings = true },
+                    onNavigateToSettings = { 
+                        showSettings = true
+                        settingsScrollTarget = null
+                    },
+                    onNavigateToProgressSettings = {
+                        showSettings = true
+                        settingsScrollTarget = "progress"
+                    },
                     onBookClick = { book -> currentBook = book },
                     onSeeAllClick = { title, books -> seeAllData = title to books },
                     onStartReading = { bookId -> libraryViewModel.startReading(bookId) },
                     onMarkCompleted = { bookId -> libraryViewModel.markAsCompleted(bookId) },
                     onMoveToPlanToRead = { bookId -> libraryViewModel.moveToplanToRead(bookId) },
                     onSetProgress = { bookId, progress -> libraryViewModel.setBookProgress(bookId, progress) },
-                    onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) }
+                    onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) },
+                    libraryManager = libraryViewModel.libraryManager
                 )
             }
         }

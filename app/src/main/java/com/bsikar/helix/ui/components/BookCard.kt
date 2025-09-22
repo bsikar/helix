@@ -51,7 +51,7 @@ fun BookCard(
             modifier = Modifier
                 .aspectRatio(0.68f)
                 .clip(RoundedCornerShape(8.dp))
-                .background(book.coverColor)
+                .background(book.coverColorComposeColor)
         ) {
             // Status indicator in top-right corner
             val statusColor = when (book.readingStatus) {

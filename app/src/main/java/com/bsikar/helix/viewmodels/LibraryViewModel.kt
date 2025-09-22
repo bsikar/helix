@@ -1,13 +1,16 @@
 package com.bsikar.helix.viewmodels
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.bsikar.helix.data.Book
 import com.bsikar.helix.data.BookRepository
+import com.bsikar.helix.data.LibraryManager
 import com.bsikar.helix.data.ReadingStatus
 import com.bsikar.helix.data.Tag
 import com.bsikar.helix.data.PresetTags
 import com.bsikar.helix.data.TagMatcher
+import com.bsikar.helix.data.UserPreferencesManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -15,22 +18,37 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.snapshotFlow
 
-class LibraryViewModel : ViewModel() {
+class LibraryViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val _allBooks = MutableStateFlow<List<Book>>(emptyList())
-    val allBooks: StateFlow<List<Book>> = _allBooks.asStateFlow()
-
-    init {
-        loadBooks()
+    private val preferencesManager = UserPreferencesManager(application)
+    val libraryManager = LibraryManager(application, preferencesManager)
+    
+    // Convert LibraryManager's books state to StateFlow
+    val allBooks: StateFlow<List<Book>> = libraryManager.books.let { state ->
+        MutableStateFlow(state.value).also { flow ->
+            viewModelScope.launch {
+                // Update flow when state changes
+                snapshotFlow { state.value }.collect { books ->
+                    flow.value = books
+                }
+            }
+        }.asStateFlow()
     }
 
-    private fun loadBooks() {
-        _allBooks.value = BookRepository.getAllBooks()
+    init {
+        // Load fake data initially if library is empty
+        viewModelScope.launch {
+            if (libraryManager.books.value.isEmpty()) {
+                libraryManager.addFakeData()
+            }
+        }
     }
 
     // Reading Books (currently reading)
-    val readingBooks: StateFlow<List<Book>> = _allBooks.map { books ->
+    val readingBooks: StateFlow<List<Book>> = allBooks.map { books ->
         books.filter { it.readingStatus == ReadingStatus.READING }
              .sortedByDescending { it.lastReadTimestamp }
     }.stateIn(
@@ -40,7 +58,7 @@ class LibraryViewModel : ViewModel() {
     )
 
     // Plan to Read Books
-    val planToReadBooks: StateFlow<List<Book>> = _allBooks.map { books ->
+    val planToReadBooks: StateFlow<List<Book>> = allBooks.map { books ->
         books.filter { it.readingStatus == ReadingStatus.PLAN_TO_READ }
              .sortedBy { it.title }
     }.stateIn(
@@ -50,7 +68,7 @@ class LibraryViewModel : ViewModel() {
     )
 
     // Completed Books
-    val completedBooks: StateFlow<List<Book>> = _allBooks.map { books ->
+    val completedBooks: StateFlow<List<Book>> = allBooks.map { books ->
         books.filter { it.readingStatus == ReadingStatus.COMPLETED }
              .sortedBy { it.title }
     }.stateIn(
@@ -60,7 +78,7 @@ class LibraryViewModel : ViewModel() {
     )
 
     // Recent Books (books that have been read recently)
-    val recentBooks: StateFlow<List<Book>> = _allBooks.map { books ->
+    val recentBooks: StateFlow<List<Book>> = allBooks.map { books ->
         books.filter { it.lastReadTimestamp > 0 }
              .sortedByDescending { it.lastReadTimestamp }
     }.stateIn(
@@ -73,17 +91,11 @@ class LibraryViewModel : ViewModel() {
      * Updates the progress of a specific book by its ID
      */
     fun updateBookProgress(bookId: String, newProgress: Float) {
-        _allBooks.update { currentBooks ->
-            currentBooks.map { book ->
-                if (book.id == bookId) {
-                    book.copy(
-                        progress = newProgress.coerceIn(0f, 1f),
-                        lastReadTimestamp = System.currentTimeMillis()
-                    )
-                } else {
-                    book
-                }
-            }
+        val book = libraryManager.getBookById(bookId)
+        if (book != null) {
+            val totalPages = if (book.totalChapters > 0) book.totalChapters * 20 else book.totalPages
+            val currentPage = (newProgress * totalPages).toInt().coerceAtLeast(1)
+            libraryManager.updateBookProgress(bookId, book.currentChapter, currentPage, book.scrollPosition)
         }
     }
 
@@ -91,115 +103,60 @@ class LibraryViewModel : ViewModel() {
      * Marks a book as started reading (sets progress to a small value if it was 0)
      */
     fun startReading(bookId: String) {
-        _allBooks.update { currentBooks ->
-            currentBooks.map { book ->
-                if (book.id == bookId && book.progress == 0f) {
-                    book.copy(
-                        progress = 0.05f, // Small progress to indicate started (5%)
-                        lastReadTimestamp = System.currentTimeMillis()
-                    )
-                } else {
-                    book
-                }
-            }
-        }
+        updateBookProgress(bookId, 0.05f) // 5%
     }
     
     /**
      * Moves a book back to Plan to Read status
      */
     fun moveToplanToRead(bookId: String) {
-        _allBooks.update { currentBooks ->
-            currentBooks.map { book ->
-                if (book.id == bookId) {
-                    book.copy(
-                        progress = 0f,
-                        lastReadTimestamp = 0L
-                    )
-                } else {
-                    book
-                }
-            }
-        }
+        updateBookProgress(bookId, 0f)
     }
     
     /**
      * Sets a specific progress for a book (between 0 and 1)
      */
     fun setBookProgress(bookId: String, progress: Float) {
-        _allBooks.update { currentBooks ->
-            currentBooks.map { book ->
-                if (book.id == bookId) {
-                    book.copy(
-                        progress = progress.coerceIn(0f, 1f),
-                        lastReadTimestamp = if (progress > 0f) System.currentTimeMillis() else 0L
-                    )
-                } else {
-                    book
-                }
-            }
-        }
+        updateBookProgress(bookId, progress)
     }
 
     /**
      * Marks a book as completed
      */
     fun markAsCompleted(bookId: String) {
-        _allBooks.update { currentBooks ->
-            currentBooks.map { book ->
-                if (book.id == bookId) {
-                    book.copy(
-                        progress = 1.0f,
-                        lastReadTimestamp = System.currentTimeMillis()
-                    )
-                } else {
-                    book
-                }
-            }
-        }
+        updateBookProgress(bookId, 1.0f)
     }
 
     /**
      * Adds a new book to the library
      */
     fun addBook(book: Book) {
-        _allBooks.update { currentBooks ->
-            currentBooks + book
-        }
+        // This would be handled by LibraryManager.importEpubFile
+        // or LibraryManager.addFakeData
     }
 
     /**
      * Removes a book from the library
      */
     fun removeBook(bookId: String) {
-        _allBooks.update { currentBooks ->
-            currentBooks.filter { it.id != bookId }
-        }
+        libraryManager.removeBook(bookId)
     }
 
     /**
      * Gets a specific book by its ID
      */
     fun getBookById(bookId: String): Book? {
-        return _allBooks.value.find { it.id == bookId }
+        return libraryManager.getBookById(bookId)
     }
 
     /**
      * Simulates reading progress update - useful for demo purposes
      */
     fun simulateReadingProgress(bookId: String) {
-        _allBooks.update { currentBooks ->
-            currentBooks.map { book ->
-                if (book.id == bookId) {
-                    val newProgress = (book.progress + 0.1f).coerceAtMost(1.0f)
-                    book.copy(
-                        progress = newProgress,
-                        lastReadTimestamp = System.currentTimeMillis()
-                    )
-                } else {
-                    book
-                }
-            }
+        val book = getBookById(bookId)
+        if (book != null) {
+            val newProgress = (book.progress + 0.1f).coerceAtMost(1.0f)
+            updateBookProgress(bookId, newProgress)
         }
     }
 
@@ -212,51 +169,23 @@ class LibraryViewModel : ViewModel() {
         currentChapter: Int = 1, 
         scrollPosition: Int = 0
     ) {
-        _allBooks.update { currentBooks ->
-            currentBooks.map { book ->
-                if (book.id == bookId) {
-                    val newProgress = currentPage.toFloat() / book.totalPages
-                    book.copy(
-                        currentPage = currentPage,
-                        currentChapter = currentChapter,
-                        scrollPosition = scrollPosition,
-                        progress = newProgress.coerceIn(0f, 1f),
-                        lastReadTimestamp = System.currentTimeMillis()
-                    )
-                } else {
-                    book
-                }
-            }
-        }
+        libraryManager.updateBookProgress(bookId, currentChapter, currentPage, scrollPosition)
     }
 
     /**
      * Updates the tags for a specific book
      */
     fun updateBookTags(bookId: String, newTags: List<String>) {
-        _allBooks.update { currentBooks ->
-            currentBooks.map { book ->
-                if (book.id == bookId) {
-                    book.copy(tags = newTags)
-                } else {
-                    book
-                }
-            }
-        }
+        libraryManager.updateBookTags(bookId, newTags)
     }
 
     /**
      * Add a tag to a book
      */
     fun addTagToBook(bookId: String, tagId: String) {
-        _allBooks.update { currentBooks ->
-            currentBooks.map { book ->
-                if (book.id == bookId && !book.hasTag(tagId)) {
-                    book.copy(tags = book.tags + tagId)
-                } else {
-                    book
-                }
-            }
+        val book = getBookById(bookId)
+        if (book != null && !book.hasTag(tagId)) {
+            updateBookTags(bookId, book.tags + tagId)
         }
     }
 
@@ -264,14 +193,9 @@ class LibraryViewModel : ViewModel() {
      * Remove a tag from a book
      */
     fun removeTagFromBook(bookId: String, tagId: String) {
-        _allBooks.update { currentBooks ->
-            currentBooks.map { book ->
-                if (book.id == bookId) {
-                    book.copy(tags = book.tags.filter { it != tagId })
-                } else {
-                    book
-                }
-            }
+        val book = getBookById(bookId)
+        if (book != null) {
+            updateBookTags(bookId, book.tags.filter { it != tagId })
         }
     }
 
@@ -279,7 +203,7 @@ class LibraryViewModel : ViewModel() {
      * Get all books that have any of the specified tags
      */
     fun getBooksByTags(tagIds: List<String>): List<Book> {
-        return _allBooks.value.filter { book ->
+        return allBooks.value.filter { book ->
             book.hasAnyTag(tagIds)
         }
     }
@@ -288,7 +212,7 @@ class LibraryViewModel : ViewModel() {
      * Get all unique tags used across all books
      */
     fun getAllUsedTags(): List<Tag> {
-        val usedTagIds = _allBooks.value
+        val usedTagIds = allBooks.value
             .flatMap { it.tags }
             .distinct()
         return usedTagIds.mapNotNull { tagId -> PresetTags.findTagById(tagId) }
@@ -300,25 +224,13 @@ class LibraryViewModel : ViewModel() {
     fun parseAndSetMetadataTags(bookId: String, metadataTags: List<String>) {
         val parsedTags = TagMatcher.parseMetadataTags(metadataTags)
         val tagIds = parsedTags.map { it.id }
-        
-        _allBooks.update { currentBooks ->
-            currentBooks.map { book ->
-                if (book.id == bookId) {
-                    book.copy(
-                        tags = tagIds,
-                        originalMetadataTags = metadataTags
-                    )
-                } else {
-                    book
-                }
-            }
-        }
+        updateBookTags(bookId, tagIds)
     }
 
     /**
      * Refreshes the book list from the repository
      */
     fun refreshBooks() {
-        loadBooks()
+        // LibraryManager handles persistence, so no need to reload
     }
 }

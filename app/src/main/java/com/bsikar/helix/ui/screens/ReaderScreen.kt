@@ -606,7 +606,7 @@ fun ReaderScreenPreview() {
     val sampleBook = Book(
         title = "Clockwork Planet",
         author = "Yuu Kamiya",
-        coverColor = androidx.compose.ui.graphics.Color(0xFFFFD700),
+        coverColor = 0xFFFFD700,
         progress = 0.3f
     )
     

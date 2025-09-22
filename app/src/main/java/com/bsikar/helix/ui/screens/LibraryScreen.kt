@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -18,10 +19,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bsikar.helix.data.Book
+import com.bsikar.helix.data.ImportProgress
+import com.bsikar.helix.data.LibraryManager
 import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.theme.ThemeMode
 import com.bsikar.helix.ui.components.InfiniteHorizontalBookScroll
 import com.bsikar.helix.ui.components.SearchBar
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -35,15 +39,44 @@ fun LibraryScreen(
     planToReadBooks: List<Book>,
     completedBooks: List<Book>,
     onNavigateToSettings: () -> Unit = {},
+    onNavigateToProgressSettings: () -> Unit = {},
     onBookClick: (Book) -> Unit = {},
     onSeeAllClick: (String, List<Book>) -> Unit = { _, _ -> },
     onStartReading: (String) -> Unit = {},
     onMarkCompleted: (String) -> Unit = {},
     onMoveToPlanToRead: (String) -> Unit = {},
     onSetProgress: (String, Float) -> Unit = { _, _ -> },
-    onEditTags: (String, List<String>) -> Unit = { _, _ -> }
+    onEditTags: (String, List<String>) -> Unit = { _, _ -> },
+    libraryManager: LibraryManager? = null
 ) {
     var searchQuery by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    var isRefreshing by remember { mutableStateOf(false) }
+    
+    // Get import progress from LibraryManager
+    val importProgress by libraryManager?.importProgress ?: remember { mutableStateOf<ImportProgress?>(null) }
+    
+    // Pull-to-refresh functionality  
+    var scanMessage by remember { mutableStateOf("") }
+    val onRefresh = {
+        if (libraryManager != null) {
+            isRefreshing = true
+            scanMessage = "Scanning for new books..."
+            libraryManager.rescanWatchedDirectoriesAsync { success, message, newCount ->
+                isRefreshing = false
+                scanMessage = if (success) {
+                    if (newCount > 0) "Found $newCount new books!" else "No new books found"
+                } else {
+                    "Scan failed: $message"
+                }
+                // Clear message after 3 seconds
+                scope.launch {
+                    kotlinx.coroutines.delay(3000)
+                    scanMessage = ""
+                }
+            }
+        }
+    }
 
     var readingSortAscending by remember { mutableStateOf(false) }
     var planToReadSortAscending by remember { mutableStateOf(true) }
@@ -193,11 +226,16 @@ fun LibraryScreen(
             }
         }
     ) { innerPadding ->
-        LazyColumn(
+        PullToRefreshBox(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            isRefreshing = isRefreshing,
+            onRefresh = onRefresh
         ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = innerPadding,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
 
             item {
                 SearchBar(
@@ -205,6 +243,97 @@ fun LibraryScreen(
                     onValueChange = { searchQuery = it },
                     theme = theme
                 )
+            }
+            
+            // Show import progress in library view
+            importProgress?.let { progress ->
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .clickable { onNavigateToProgressSettings() },
+                        colors = CardDefaults.cardColors(containerColor = theme.surfaceColor),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(
+                                progress = progress.percentage / 100f,
+                                modifier = Modifier.size(20.dp),
+                                color = theme.accentColor,
+                                strokeWidth = 2.dp
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Importing books... ${progress.percentage}%",
+                                    color = theme.primaryTextColor,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = "${progress.current} of ${progress.total} files",
+                                    color = theme.secondaryTextColor,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            Icon(
+                                Icons.Filled.ChevronRight,
+                                contentDescription = "Go to Settings",
+                                tint = theme.secondaryTextColor,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+            
+            // Show scan status message
+            if (scanMessage.isNotEmpty()) {
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (scanMessage.contains("Found") && !scanMessage.contains("No new")) 
+                                theme.accentColor.copy(alpha = 0.1f) 
+                            else 
+                                theme.surfaceColor
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (isRefreshing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    color = theme.accentColor,
+                                    strokeWidth = 2.dp
+                                )
+                            }
+                            Text(
+                                text = scanMessage,
+                                color = if (scanMessage.contains("Found") && !scanMessage.contains("No new")) 
+                                    theme.accentColor 
+                                else 
+                                    theme.primaryTextColor,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
             }
 
             if (filteredReadingBooks.isNotEmpty()) {
@@ -305,6 +434,7 @@ fun LibraryScreen(
             }
         }
     }
+        }
 }
 
 @Composable

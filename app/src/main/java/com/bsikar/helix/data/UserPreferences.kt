@@ -88,6 +88,9 @@ class UserPreferencesManager(private val context: Context) {
         val CUSTOM_PRESET_3_MARGIN_V = intPreferencesKey("custom_preset_3_margin_v")
         
         val BOOKMARKS = stringPreferencesKey("bookmarks")
+        val LIBRARY_DATA = stringPreferencesKey("library_data")
+        val WATCHED_DIRECTORIES = stringPreferencesKey("watched_directories")
+        val IMPORTED_FILES = stringPreferencesKey("imported_files")
     }
     
     init {
@@ -426,6 +429,70 @@ class UserPreferencesManager(private val context: Context) {
     fun isPageBookmarked(bookId: String, chapterNumber: Int, pageNumber: Int): Boolean {
         return getBookmarks(bookId).any { 
             it.chapterNumber == chapterNumber && it.pageNumber == pageNumber 
+        }
+    }
+    
+    // Library management functions
+    suspend fun getLibraryData(): String {
+        return try {
+            context.dataStore.data.first()[PreferenceKeys.LIBRARY_DATA] ?: "[]"
+        } catch (e: Exception) {
+            e.printStackTrace()
+            "[]"
+        }
+    }
+    
+    suspend fun saveLibraryData(libraryJson: String) {
+        scope.launch {
+            try {
+                context.dataStore.edit { preferences ->
+                    preferences[PreferenceKeys.LIBRARY_DATA] = libraryJson
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+    
+    suspend fun getWatchedDirectories(): String {
+        return try {
+            context.dataStore.data.first()[PreferenceKeys.WATCHED_DIRECTORIES] ?: "[]"
+        } catch (e: Exception) {
+            e.printStackTrace()
+            "[]"
+        }
+    }
+    
+    suspend fun saveWatchedDirectories(watchedDirsJson: String) {
+        scope.launch {
+            try {
+                context.dataStore.edit { preferences ->
+                    preferences[PreferenceKeys.WATCHED_DIRECTORIES] = watchedDirsJson
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+    
+    suspend fun getImportedFiles(): String {
+        return try {
+            context.dataStore.data.first()[PreferenceKeys.IMPORTED_FILES] ?: "[]"
+        } catch (e: Exception) {
+            e.printStackTrace()
+            "[]"
+        }
+    }
+    
+    suspend fun saveImportedFiles(importedFilesJson: String) {
+        scope.launch {
+            try {
+                context.dataStore.edit { preferences ->
+                    preferences[PreferenceKeys.IMPORTED_FILES] = importedFilesJson
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 }

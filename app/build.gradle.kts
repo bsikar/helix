@@ -81,6 +81,13 @@ dependencies {
     // System UI Controller for status bar styling
     implementation("com.google.accompanist:accompanist-systemuicontroller:0.32.0")
     
+    // EPUB parsing - using a lightweight ZIP library + XML parsing
+    implementation("net.lingala.zip4j:zip4j:2.11.5")
+    implementation("org.jsoup:jsoup:1.16.1") // For HTML parsing
+    
+    // File picker for import functionality
+    implementation("androidx.activity:activity-compose:1.8.2")
+    
     // Test dependencies for unit testing
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.mockito:mockito-core:5.5.0")

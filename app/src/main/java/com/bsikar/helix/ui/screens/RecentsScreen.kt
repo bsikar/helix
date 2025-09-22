@@ -313,7 +313,7 @@ fun RecentBookItem(
                     .width(60.dp)
                     .aspectRatio(0.68f)
                     .clip(RoundedCornerShape(6.dp))
-                    .background(book.coverColor)
+                    .background(book.coverColorComposeColor)
             )
             
             // Book info

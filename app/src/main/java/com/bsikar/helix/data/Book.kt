@@ -2,18 +2,22 @@ package com.bsikar.helix.data
 
 import androidx.compose.ui.graphics.Color
 import java.util.UUID
+import kotlinx.serialization.Serializable
+import java.io.File
 
+@Serializable
 enum class ReadingStatus {
     PLAN_TO_READ,
     READING,
     COMPLETED
 }
 
+@Serializable
 data class Book(
     val id: String = UUID.randomUUID().toString(),
     val title: String,
     val author: String,
-    val coverColor: Color,
+    val coverColor: Long, // Store as Long for serialization
     val progress: Float = 0f,
     val lastReadTimestamp: Long = 0L,
     val dateAdded: Long = System.currentTimeMillis(),
@@ -22,8 +26,27 @@ data class Book(
     val scrollPosition: Int = 0,
     val totalPages: Int = 150,
     val tags: List<String> = emptyList(), // List of tag IDs
-    val originalMetadataTags: List<String> = emptyList() // Original metadata tags for reference
+    val originalMetadataTags: List<String> = emptyList(), // Original metadata tags for reference
+    
+    // EPUB-specific fields
+    val filePath: String? = null, // Path to EPUB file
+    val fileSize: Long = 0L,
+    val totalChapters: Int = 1,
+    val description: String? = null,
+    val publisher: String? = null,
+    val language: String? = null,
+    val isbn: String? = null,
+    val publishedDate: String? = null,
+    val coverImagePath: String? = null,
+    val isImported: Boolean = false // true for real EPUBs, false for fake data
 ) {
+    // Convenience property for UI
+    val coverColorComposeColor: Color
+        get() = Color(coverColor)
+        
+    companion object {
+        fun fromColor(color: Color): Long = color.value.toLong()
+    }
     val readingStatus: ReadingStatus
         get() = when {
             progress == 0f -> ReadingStatus.PLAN_TO_READ
