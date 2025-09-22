@@ -13,13 +13,17 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
 
 data class UserPreferences(
     val themeMode: ThemeMode = ThemeMode.LIGHT,
     val selectedReaderSettings: ReaderSettings = ReaderSettings(),
     val savedCustomPresets: List<ReaderPreset?> = listOf(null, null, null),
     val currentPresetName: String? = null,
-    val lastSelectedPresetType: PresetType = PresetType.DEFAULT
+    val lastSelectedPresetType: PresetType = PresetType.DEFAULT,
+    val bookmarks: List<Bookmark> = emptyList()
 )
 
 enum class PresetType {
@@ -82,6 +86,8 @@ class UserPreferencesManager(private val context: Context) {
         val CUSTOM_PRESET_3_TEXT_ALIGN = stringPreferencesKey("custom_preset_3_text_align")
         val CUSTOM_PRESET_3_MARGIN_H = intPreferencesKey("custom_preset_3_margin_h")
         val CUSTOM_PRESET_3_MARGIN_V = intPreferencesKey("custom_preset_3_margin_v")
+        
+        val BOOKMARKS = stringPreferencesKey("bookmarks")
     }
     
     init {
@@ -144,12 +150,22 @@ class UserPreferencesManager(private val context: Context) {
             preferences[PreferenceKeys.LAST_SELECTED_PRESET_TYPE] ?: PresetType.DEFAULT.name
         )
         
+        // Load bookmarks from DataStore
+        val bookmarks = try {
+            val bookmarksJson = preferences[PreferenceKeys.BOOKMARKS] ?: "[]"
+            Json.decodeFromString<List<Bookmark>>(bookmarksJson)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emptyList<Bookmark>()
+        }
+        
         _preferences.value = UserPreferences(
             themeMode = themeMode,
             selectedReaderSettings = readerSettings,
             savedCustomPresets = customPresets,
             currentPresetName = currentPresetName,
-            lastSelectedPresetType = lastSelectedPresetType
+            lastSelectedPresetType = lastSelectedPresetType,
+            bookmarks = bookmarks
         )
     }
     
@@ -319,5 +335,97 @@ class UserPreferencesManager(private val context: Context) {
     
     fun hasInitialLoadCompleted(): Boolean {
         return hasInitialLoad
+    }
+    
+    // Bookmark management functions
+    fun getBookmarks(bookId: String? = null): List<Bookmark> {
+        val bookmarks = (_preferences.value ?: UserPreferences()).bookmarks
+        return if (bookId != null) {
+            bookmarks.filter { it.bookId == bookId }.sortedByDescending { it.timestamp }
+        } else {
+            bookmarks.sortedByDescending { it.timestamp }
+        }
+    }
+    
+    fun addBookmark(bookmark: Bookmark) {
+        val currentPrefs = _preferences.value ?: UserPreferences()
+        val updatedBookmarks = currentPrefs.bookmarks.toMutableList()
+        
+        // Remove existing bookmark at same location
+        updatedBookmarks.removeAll { 
+            it.bookId == bookmark.bookId && 
+            it.chapterNumber == bookmark.chapterNumber && 
+            it.pageNumber == bookmark.pageNumber 
+        }
+        
+        // Add new bookmark
+        updatedBookmarks.add(bookmark)
+        
+        // Update state immediately
+        _preferences.value = currentPrefs.copy(bookmarks = updatedBookmarks)
+        
+        // Persist to DataStore
+        scope.launch {
+            try {
+                context.dataStore.edit { preferences ->
+                    val bookmarksJson = Json.encodeToString(updatedBookmarks)
+                    preferences[PreferenceKeys.BOOKMARKS] = bookmarksJson
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+    
+    fun removeBookmark(bookmarkId: String) {
+        val currentPrefs = _preferences.value ?: UserPreferences()
+        val updatedBookmarks = currentPrefs.bookmarks.filter { it.id != bookmarkId }
+        
+        // Update state immediately
+        _preferences.value = currentPrefs.copy(bookmarks = updatedBookmarks)
+        
+        // Persist to DataStore
+        scope.launch {
+            try {
+                context.dataStore.edit { preferences ->
+                    val bookmarksJson = Json.encodeToString(updatedBookmarks)
+                    preferences[PreferenceKeys.BOOKMARKS] = bookmarksJson
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+    
+    fun updateBookmarkNote(bookmarkId: String, note: String) {
+        val currentPrefs = _preferences.value ?: UserPreferences()
+        val updatedBookmarks = currentPrefs.bookmarks.map { bookmark ->
+            if (bookmark.id == bookmarkId) {
+                bookmark.copy(note = note)
+            } else {
+                bookmark
+            }
+        }
+        
+        // Update state immediately
+        _preferences.value = currentPrefs.copy(bookmarks = updatedBookmarks)
+        
+        // Persist to DataStore
+        scope.launch {
+            try {
+                context.dataStore.edit { preferences ->
+                    val bookmarksJson = Json.encodeToString(updatedBookmarks)
+                    preferences[PreferenceKeys.BOOKMARKS] = bookmarksJson
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+    
+    fun isPageBookmarked(bookId: String, chapterNumber: Int, pageNumber: Int): Boolean {
+        return getBookmarks(bookId).any { 
+            it.chapterNumber == chapterNumber && it.pageNumber == pageNumber 
+        }
     }
 }

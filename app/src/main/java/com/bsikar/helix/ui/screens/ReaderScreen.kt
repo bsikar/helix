@@ -1,7 +1,9 @@
 package com.bsikar.helix.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -32,8 +34,10 @@ import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.theme.ThemeManager
 import com.bsikar.helix.theme.ThemeMode
 import com.bsikar.helix.ui.components.HighlightedText
+import com.bsikar.helix.ui.components.BookmarkDialog
+import com.bsikar.helix.data.Bookmark
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ReaderScreen(
     book: Book,
@@ -46,7 +50,16 @@ fun ReaderScreen(
     val totalPages = book.totalPages
     var showSettings by remember { mutableStateOf(false) }
     var showChapterDialog by remember { mutableStateOf(false) }
+    var showBookmarkDialog by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState(initial = book.scrollPosition)
+    
+    // Get bookmarks for this book
+    val bookmarks by remember { derivedStateOf { preferencesManager.getBookmarks(book.id) } }
+    val isCurrentPageBookmarked by remember { 
+        derivedStateOf { 
+            preferencesManager.isPageBookmarked(book.id, book.currentChapter, currentPage) 
+        } 
+    }
     
     // Use persistent reader settings from UserPreferencesManager
     val userPreferences by preferencesManager.preferences
@@ -154,12 +167,45 @@ fun ReaderScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { }) {
-                        Icon(
-                            Icons.Filled.Bookmark,
-                            contentDescription = "Bookmark",
-                            tint = theme.secondaryTextColor
+                    // Single bookmark icon with smart behavior
+                    Box(
+                        modifier = Modifier.combinedClickable(
+                            onClick = { 
+                                // Short press: add bookmark instantly (regardless of current state)
+                                val newBookmark = Bookmark(
+                                    bookId = book.id,
+                                    bookTitle = book.title,
+                                    chapterNumber = book.currentChapter,
+                                    pageNumber = currentPage,
+                                    scrollPosition = scrollState.value
+                                )
+                                preferencesManager.addBookmark(newBookmark)
+                            },
+                            onLongClick = {
+                                // Long press: always show bookmark management dialog
+                                showBookmarkDialog = true
+                            }
                         )
+                        .size(48.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                            Icon(
+                                if (isCurrentPageBookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
+                                contentDescription = if (isCurrentPageBookmarked) "Manage bookmarks" else "Add bookmark",
+                                tint = if (isCurrentPageBookmarked) theme.accentColor else theme.secondaryTextColor
+                            )
+                            // Show badge if there are multiple bookmarks
+                            if (bookmarks.size > 1) {
+                                Badge(
+                                    modifier = Modifier.align(Alignment.TopEnd)
+                                ) {
+                                    Text(
+                                        text = bookmarks.size.toString(),
+                                        fontSize = 10.sp,
+                                        color = androidx.compose.ui.graphics.Color.White
+                                    )
+                                }
+                            }
                     }
                     IconButton(onClick = { showSettings = true }) {
                         Icon(
@@ -234,6 +280,40 @@ fun ReaderScreen(
             },
             onDismiss = { showChapterDialog = false },
             theme = theme
+        )
+    }
+    
+    // Bookmark management dialog
+    if (showBookmarkDialog) {
+        BookmarkDialog(
+            bookmarks = bookmarks,
+            onDismiss = { showBookmarkDialog = false },
+            onBookmarkClick = { bookmark ->
+                // Navigate to bookmarked location
+                currentPage = bookmark.pageNumber
+                // Note: In a real implementation, you'd also update scroll position
+                // scrollState.scrollTo(bookmark.scrollPosition)
+                showBookmarkDialog = false
+            },
+            onBookmarkDelete = { bookmarkId ->
+                preferencesManager.removeBookmark(bookmarkId)
+            },
+            onBookmarkEditNote = { bookmarkId, note ->
+                preferencesManager.updateBookmarkNote(bookmarkId, note)
+            },
+            theme = theme,
+            currentChapter = book.currentChapter,
+            currentPage = currentPage,
+            onQuickBookmark = {
+                val newBookmark = Bookmark(
+                    bookId = book.id,
+                    bookTitle = book.title,
+                    chapterNumber = book.currentChapter,
+                    pageNumber = currentPage,
+                    scrollPosition = scrollState.value
+                )
+                preferencesManager.addBookmark(newBookmark)
+            }
         )
     }
 }
