@@ -9,7 +9,7 @@ import androidx.compose.ui.text.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
-import com.bsikar.helix.data.TagMatcher
+import com.bsikar.helix.data.model.TagMatcher
 import kotlin.math.max
 import kotlin.math.min
 

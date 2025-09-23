@@ -915,7 +915,7 @@ fun ReaderSettingsScreenPreview() {
             onSettingsChange = { settings = it },
             theme = theme,
             onBackClick = { },
-            preferencesManager = UserPreferencesManager(androidx.compose.ui.platform.LocalContext.current)
+            preferencesManager = TODO("Preview requires dependency injection")
         )
     }
 }

@@ -19,8 +19,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.bsikar.helix.data.Book
-import com.bsikar.helix.data.CoverDisplayMode
+import com.bsikar.helix.data.model.Book
+import com.bsikar.helix.data.model.CoverDisplayMode
 import com.bsikar.helix.theme.AppTheme
 
 /**
@@ -40,7 +40,7 @@ data class BookMetadataUpdate(
 
 @Composable
 fun BookSettingsDialog(
-    book: Book,
+    book: com.bsikar.helix.data.model.Book,
     theme: AppTheme,
     onDismiss: () -> Unit,
     onSaveSettings: (BookMetadataUpdate) -> Unit

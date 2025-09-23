@@ -9,10 +9,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.*
@@ -310,35 +312,169 @@ fun ThemeSelector(
     onThemeChange: (ThemeMode) -> Unit,
     theme: AppTheme
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceEvenly
-    ) {
-        ThemeMode.values().forEach { themeMode ->
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
-            ) {
-                RadioButton(
-                    selected = currentTheme == themeMode,
+    var showReaderThemes by remember { mutableStateOf(false) }
+    
+    Column(modifier = Modifier.fillMaxWidth()) {
+        // Main theme categories
+        Text(
+            text = "App Theme",
+            color = theme.primaryTextColor,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        
+        // Basic themes
+        val basicThemes = if (ThemeManager.isDynamicColorSupported()) {
+            listOf(ThemeMode.LIGHT, ThemeMode.DARK, ThemeMode.SYSTEM, ThemeMode.DYNAMIC)
+        } else {
+            listOf(ThemeMode.LIGHT, ThemeMode.DARK, ThemeMode.SYSTEM)
+        }
+        
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            items(basicThemes) { themeMode ->
+                ThemeCard(
+                    themeMode = themeMode,
+                    isSelected = currentTheme == themeMode,
                     onClick = { onThemeChange(themeMode) },
-                    colors = RadioButtonDefaults.colors(
-                        selectedColor = theme.accentColor,
-                        unselectedColor = theme.secondaryTextColor
-                    )
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = when (themeMode) {
-                        ThemeMode.LIGHT -> "Light"
-                        ThemeMode.DARK -> "Dark"
-                        ThemeMode.SYSTEM -> "System"
-                    },
-                    color = theme.primaryTextColor,
-                    fontSize = 14.sp
+                    theme = theme
                 )
             }
         }
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // Reader themes toggle
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showReaderThemes = !showReaderThemes }
+                .padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Reader-Optimized Themes",
+                color = theme.primaryTextColor,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Icon(
+                imageVector = if (showReaderThemes) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = if (showReaderThemes) "Hide reader themes" else "Show reader themes",
+                tint = theme.accentColor
+            )
+        }
+        
+        // Reader themes (collapsible)
+        if (showReaderThemes) {
+            val readerThemes = ThemeManager.getReaderThemeModes()
+            
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(readerThemes) { themeMode ->
+                    ThemeCard(
+                        themeMode = themeMode,
+                        isSelected = currentTheme == themeMode,
+                        onClick = { onThemeChange(themeMode) },
+                        theme = theme,
+                        isReaderTheme = true
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemeCard(
+    themeMode: ThemeMode,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    theme: AppTheme,
+    isReaderTheme: Boolean = false
+) {
+    val themeColors = getThemePreviewColors(themeMode)
+    
+    Card(
+        modifier = Modifier
+            .width(100.dp)
+            .height(80.dp)
+            .clickable { onClick() },
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) theme.accentColor.copy(alpha = 0.2f) else theme.surfaceColor
+        ),
+        border = if (isSelected) {
+            androidx.compose.foundation.BorderStroke(2.dp, theme.accentColor)
+        } else null
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            // Theme preview
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(24.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .background(themeColors.first)
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .background(themeColors.second)
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(4.dp))
+            
+            // Theme name
+            Text(
+                text = themeMode.displayName,
+                color = theme.primaryTextColor,
+                fontSize = 10.sp,
+                maxLines = 2
+            )
+            
+            // Reader indicator
+            if (isReaderTheme) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                    contentDescription = "Reader optimized",
+                    modifier = Modifier.size(12.dp),
+                    tint = theme.accentColor
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun getThemePreviewColors(themeMode: ThemeMode): Pair<Color, Color> {
+    return when (themeMode) {
+        ThemeMode.LIGHT -> Color(0xFFEFEBE3) to Color(0xFF3C3836)
+        ThemeMode.DARK -> Color(0xFF1D2021) to Color(0xFFF9F5D7)
+        ThemeMode.SYSTEM -> Color(0xFFE0E0E0) to Color(0xFF424242)
+        ThemeMode.DYNAMIC -> Color(0xFF6B4423) to Color(0xFFF2D2A7)
+        ThemeMode.SEPIA -> Color(0xFFF7F3E9) to Color(0xFF5D4E37)
+        ThemeMode.HIGH_CONTRAST -> Color(0xFFFFFFFF) to Color(0xFF000000)
+        ThemeMode.NIGHT_MODE -> Color(0xFF000000) to Color(0xFFE0E0E0)
+        ThemeMode.WARM -> Color(0xFFFFF8E1) to Color(0xFF4E342E)
+        ThemeMode.COOL -> Color(0xFFE8F4FD) to Color(0xFF0D47A1)
     }
 }
 

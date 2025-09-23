@@ -1,4 +1,4 @@
-package com.bsikar.helix.data
+package com.bsikar.helix.data.model
 
 import androidx.compose.ui.graphics.Color
 import java.util.UUID

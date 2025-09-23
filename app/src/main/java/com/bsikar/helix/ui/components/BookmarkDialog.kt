@@ -19,12 +19,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.bsikar.helix.data.Bookmark
+import com.bsikar.helix.data.model.Bookmark
 import com.bsikar.helix.theme.AppTheme
 
 @Composable
 fun BookmarkDialog(
-    bookmarks: List<Bookmark>,
+    bookmarks: List<com.bsikar.helix.data.model.Bookmark>,
     onDismiss: () -> Unit,
     onBookmarkClick: (Bookmark) -> Unit,
     onBookmarkDelete: (String) -> Unit,
@@ -184,7 +184,7 @@ fun BookmarkDialog(
 
 @Composable
 fun BookmarkItem(
-    bookmark: Bookmark,
+    bookmark: com.bsikar.helix.data.model.Bookmark,
     isEditing: Boolean,
     editNote: String,
     onEditNoteChange: (String) -> Unit,

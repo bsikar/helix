@@ -13,7 +13,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.bsikar.helix.data.Book
+import com.bsikar.helix.data.model.Book
 import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.ui.components.BookCard
 
@@ -21,7 +21,7 @@ import com.bsikar.helix.ui.components.BookCard
 @Composable
 fun SeeAllScreen(
     title: String,
-    books: List<Book>,
+    books: List<com.bsikar.helix.data.model.Book>,
     theme: AppTheme,
     onBackClick: () -> Unit,
     onBookClick: (Book) -> Unit = {}

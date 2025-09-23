@@ -19,6 +19,24 @@ import java.io.File
 import java.util.*
 import android.util.Log
 import com.bsikar.helix.utils.FileUtils
+import com.bsikar.helix.data.model.Book
+import com.bsikar.helix.data.model.Bookmark
+import com.bsikar.helix.data.model.Tag
+import com.bsikar.helix.data.model.TagCategory
+import com.bsikar.helix.data.model.ReadingStatus
+import com.bsikar.helix.data.model.CoverDisplayMode
+import com.bsikar.helix.data.repository.BookRepository
+import com.bsikar.helix.data.parser.EpubParser
+import com.bsikar.helix.data.model.ParsedEpub
+import com.bsikar.helix.data.source.dao.WatchedDirectoryDao
+import com.bsikar.helix.data.source.dao.ImportedFileDao
+import com.bsikar.helix.data.mapper.toEntity
+import com.bsikar.helix.data.mapper.toWatchedDirectory
+import com.bsikar.helix.data.mapper.toImportedFile
+import com.bsikar.helix.data.mapper.toWatchedDirectories
+import com.bsikar.helix.data.mapper.toImportedFiles
+import com.bsikar.helix.data.repository.EpubMetadataCacheRepository
+import com.bsikar.helix.data.repository.ChapterRepository
 
 @Serializable
 data class WatchedDirectory(
@@ -43,13 +61,18 @@ data class ImportedFile(
 
 class LibraryManager(
     private val context: Context,
-    private val preferencesManager: UserPreferencesManager
+    private val preferencesManager: UserPreferencesManager,
+    private val bookRepository: BookRepository,
+    private val watchedDirectoryDao: WatchedDirectoryDao,
+    private val importedFileDao: ImportedFileDao,
+    private val epubMetadataCacheRepository: EpubMetadataCacheRepository,
+    private val chapterRepository: ChapterRepository
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private val epubParser = EpubParser(context)
     
-    private val _books = mutableStateOf<List<Book>>(emptyList())
-    val books: State<List<Book>> = _books
+    private val _books = mutableStateOf<List<com.bsikar.helix.data.model.Book>>(emptyList())
+    val books: State<List<com.bsikar.helix.data.model.Book>> = _books
     
     private val _isLoading = mutableStateOf(false)
     val isLoading: State<Boolean> = _isLoading
@@ -72,35 +95,40 @@ class LibraryManager(
         _importProgress.value = null
     }
     
+    // Observe books from repository and update local state for Compose compatibility
     init {
+        scope.launch {
+            bookRepository.getAllBooksFlow().collect { bookList ->
+                _books.value = bookList
+            }
+        }
         loadLibrary()
     }
     
     private fun loadLibrary() {
         scope.launch {
             try {
-                val libraryJson = preferencesManager.getLibraryData()
-                if (libraryJson.isNotEmpty()) {
-                    val loadedBooks = Json.decodeFromString<List<Book>>(libraryJson)
-                    _books.value = loadedBooks
+                // Books are now loaded from Room database via bookRepository
+                
+                // Load watched directories from Room database
+                val watchedDirEntities = watchedDirectoryDao.getAllWatchedDirectories()
+                _watchedDirectories.value = watchedDirEntities.toWatchedDirectories()
+                
+                // Load imported files from Room database
+                val importedFileEntities = importedFileDao.getAllImportedFiles()
+                _importedFiles.value = importedFileEntities.toImportedFiles()
+                
+                // Migrate from SharedPreferences if Room database is empty
+                if (watchedDirEntities.isEmpty()) {
+                    migrateWatchedDirectoriesFromPreferences()
                 }
                 
-                // Load watched directories
-                val watchedDirsJson = preferencesManager.getWatchedDirectories()
-                if (watchedDirsJson.isNotEmpty()) {
-                    val loadedDirs = Json.decodeFromString<List<WatchedDirectory>>(watchedDirsJson)
-                    _watchedDirectories.value = loadedDirs
+                if (importedFileEntities.isEmpty()) {
+                    migrateImportedFilesFromPreferences()
                 }
                 
-                // Load imported files
-                val importedFilesJson = preferencesManager.getImportedFiles()
-                if (importedFilesJson.isNotEmpty()) {
-                    val loadedFiles = Json.decodeFromString<List<ImportedFile>>(importedFilesJson)
-                    _importedFiles.value = loadedFiles
-                }
             } catch (e: Exception) {
-                e.printStackTrace()
-                _books.value = emptyList()
+                Log.e("LibraryManager", "Error loading library data: ${e.message}", e)
                 _watchedDirectories.value = emptyList()
                 _importedFiles.value = emptyList()
             }
@@ -109,28 +137,108 @@ class LibraryManager(
     
     private suspend fun saveLibrary() {
         try {
-            val libraryJson = Json.encodeToString(_books.value)
-            preferencesManager.saveLibraryData(libraryJson)
+            // Books are now persisted in Room database automatically
             
-            val watchedDirsJson = Json.encodeToString(_watchedDirectories.value)
-            preferencesManager.saveWatchedDirectories(watchedDirsJson)
+            // Save watched directories to Room database
+            val watchedDirEntities = _watchedDirectories.value.map { it.toEntity() }
+            watchedDirectoryDao.deleteAllWatchedDirectories()
+            watchedDirectoryDao.insertWatchedDirectories(watchedDirEntities)
             
-            val importedFilesJson = Json.encodeToString(_importedFiles.value)
-            preferencesManager.saveImportedFiles(importedFilesJson)
+            // Save imported files to Room database
+            val importedFileEntities = _importedFiles.value.map { it.toEntity() }
+            importedFileDao.deleteAllImportedFiles()
+            importedFileDao.insertImportedFiles(importedFileEntities)
+            
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("LibraryManager", "Error saving library data: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Migrate watched directories from SharedPreferences to Room database
+     */
+    private suspend fun migrateWatchedDirectoriesFromPreferences() {
+        try {
+            val watchedDirsJson = preferencesManager.getWatchedDirectories()
+            if (watchedDirsJson.isNotEmpty()) {
+                val loadedDirs = Json.decodeFromString<List<WatchedDirectory>>(watchedDirsJson)
+                val entities = loadedDirs.map { it.toEntity() }
+                watchedDirectoryDao.insertWatchedDirectories(entities)
+                _watchedDirectories.value = loadedDirs
+                
+                // Clear SharedPreferences after successful migration
+                preferencesManager.saveWatchedDirectories("")
+                Log.i("LibraryManager", "Migrated ${loadedDirs.size} watched directories from SharedPreferences to Room")
+            }
+        } catch (e: Exception) {
+            Log.e("LibraryManager", "Error migrating watched directories from SharedPreferences: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Migrate imported files from SharedPreferences to Room database
+     */
+    private suspend fun migrateImportedFilesFromPreferences() {
+        try {
+            val importedFilesJson = preferencesManager.getImportedFiles()
+            if (importedFilesJson.isNotEmpty()) {
+                val loadedFiles = Json.decodeFromString<List<ImportedFile>>(importedFilesJson)
+                val entities = loadedFiles.map { it.toEntity() }
+                importedFileDao.insertImportedFiles(entities)
+                _importedFiles.value = loadedFiles
+                
+                // Clear SharedPreferences after successful migration
+                preferencesManager.saveImportedFiles("")
+                Log.i("LibraryManager", "Migrated ${loadedFiles.size} imported files from SharedPreferences to Room")
+            }
+        } catch (e: Exception) {
+            Log.e("LibraryManager", "Error migrating imported files from SharedPreferences: ${e.message}", e)
         }
     }
     
     suspend fun importEpubFileForRescan(file: File, directoryPath: String): Result<Book> = withContext(Dispatchers.IO) {
         try {
-            val epubResult = epubParser.parseEpubMetadataOnly(file)
-            if (epubResult.isFailure) {
-                return@withContext Result.failure(epubResult.exceptionOrNull() ?: Exception("Failed to parse EPUB"))
+            // Use file path as cache key first
+            val cacheKey = file.absolutePath.hashCode().toString()
+            
+            // Check cache first using file path
+            val cachedMetadata = epubMetadataCacheRepository.getCachedMetadata(cacheKey)
+            val isValidCache = cachedMetadata != null && epubMetadataCacheRepository.isCacheValid(cacheKey, file.absolutePath)
+            
+            val parsedEpub = if (isValidCache) {
+                Log.d("LibraryManager", "Using cached metadata for ${file.name}")
+                cachedMetadata
+            } else {
+                Log.d("LibraryManager", "Cache miss or invalid, parsing ${file.name}")
+                val startTime = System.currentTimeMillis()
+                val epubResult = epubParser.parseEpubMetadataOnly(file)
+                if (epubResult.isFailure) {
+                    return@withContext Result.failure(epubResult.exceptionOrNull() ?: Exception("Failed to parse EPUB"))
+                }
+                
+                val parsed = epubResult.getOrThrow()
+                val parsingTime = System.currentTimeMillis() - startTime
+                
+                // Cache the parsed metadata using cache key
+                epubMetadataCacheRepository.cacheMetadata(cacheKey, parsed, parsingTime)
+                
+                parsed
             }
             
-            val parsedEpub = epubResult.getOrThrow()
             val bookId = UUID.randomUUID().toString()
+            
+            // Extract cover art if available
+            val extractedCoverPath = try {
+                val coverResult = epubParser.extractCoverArt(file, bookId, parsedEpub.opfPath)
+                if (coverResult.isSuccess) {
+                    coverResult.getOrNull()
+                } else {
+                    null
+                }
+            } catch (e: Exception) {
+                Log.w("LibraryManager", "Failed to extract cover art: ${e.message}")
+                null
+            }
             
             val book = Book(
                 id = bookId,
@@ -147,7 +255,7 @@ class LibraryManager(
                 language = parsedEpub.metadata.language,
                 isbn = parsedEpub.metadata.isbn,
                 publishedDate = parsedEpub.metadata.publishedDate,
-                coverImagePath = parsedEpub.coverImagePath,
+                coverImagePath = extractedCoverPath,
                 isImported = true,
                 tags = emptyList(),
                 originalMetadataTags = parsedEpub.metadata.subjects
@@ -163,9 +271,10 @@ class LibraryManager(
                 sourceUri = directoryPath // Store the watched directory path
             )
             
-            val updatedBooks = _books.value.toMutableList()
-            updatedBooks.add(book)
-            _books.value = updatedBooks
+            bookRepository.insertBook(book)
+            
+            // Store chapters for navigation
+            chapterRepository.storeChaptersFromEpub(bookId, parsedEpub)
             
             val updatedImportedFiles = _importedFiles.value.toMutableList()
             updatedImportedFiles.add(importedFile)
@@ -181,12 +290,44 @@ class LibraryManager(
         try {
             val bookId = UUID.randomUUID().toString()
             
+            // Cache the metadata using URI as cache key
+            val cacheKey = originalUri.hashCode().toString()
+            epubMetadataCacheRepository.cacheMetadata(cacheKey, parsedEpub)
+            
             // Calculate checksum for file change detection
             val fileChecksum = FileUtils.calculateFastChecksum(context, originalUri)
             Log.d("LibraryManager", "Calculated checksum for ${parsedEpub.metadata.title}: $fileChecksum")
             
             // Never create backup copies - use URI-only access for better performance and storage
             val backupFilePath: String? = null
+            
+            // Extract cover art if available (for URI-based imports, create temporary file)
+            val extractedCoverPath = try {
+                val tempFile = File.createTempFile("cover_extract_", ".epub", context.cacheDir)
+                try {
+                    // Copy URI content to temp file for cover extraction
+                    context.contentResolver.openInputStream(Uri.parse(originalUri))?.use { inputStream ->
+                        tempFile.outputStream().use { outputStream ->
+                            inputStream.copyTo(outputStream)
+                        }
+                    }
+                    
+                    val coverResult = epubParser.extractCoverArt(tempFile, bookId, parsedEpub.opfPath)
+                    if (coverResult.isSuccess) {
+                        coverResult.getOrNull()
+                    } else {
+                        null
+                    }
+                } finally {
+                    // Always clean up temp file
+                    if (tempFile.exists()) {
+                        tempFile.delete()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("LibraryManager", "Failed to extract cover art from URI: ${e.message}")
+                null
+            }
             
             val book = Book(
                 id = bookId,
@@ -203,7 +344,7 @@ class LibraryManager(
                 language = parsedEpub.metadata.language,
                 isbn = parsedEpub.metadata.isbn,
                 publishedDate = parsedEpub.metadata.publishedDate,
-                coverImagePath = parsedEpub.coverImagePath,
+                coverImagePath = extractedCoverPath,
                 isImported = true,
                 tags = emptyList(),
                 originalMetadataTags = parsedEpub.metadata.subjects,
@@ -212,9 +353,7 @@ class LibraryManager(
             )
             
             // Add to library
-            val updatedBooks = _books.value.toMutableList()
-            updatedBooks.add(book)
-            _books.value = updatedBooks
+            bookRepository.insertBook(book)
             
             // Track imported file - use URI for path since no backup file exists
             val updatedImportedFiles = _importedFiles.value.toMutableList()
@@ -236,13 +375,47 @@ class LibraryManager(
 
     suspend fun importEpubFileForDirectory(file: File, originalUri: String, directoryUri: String): Result<Book> = withContext(Dispatchers.IO) {
         try {
-            val epubResult = epubParser.parseEpubMetadataOnly(file)
-            if (epubResult.isFailure) {
-                return@withContext Result.failure(epubResult.exceptionOrNull() ?: Exception("Failed to parse EPUB"))
+            // Use file path as cache key
+            val cacheKey = file.absolutePath.hashCode().toString()
+            
+            // Check cache first
+            val cachedMetadata = epubMetadataCacheRepository.getCachedMetadata(cacheKey)
+            val isValidCache = cachedMetadata != null && epubMetadataCacheRepository.isCacheValid(cacheKey, file.absolutePath)
+            
+            val parsedEpub = if (isValidCache) {
+                Log.d("LibraryManager", "Using cached metadata for ${file.name}")
+                cachedMetadata
+            } else {
+                Log.d("LibraryManager", "Cache miss or invalid, parsing ${file.name}")
+                val startTime = System.currentTimeMillis()
+                val epubResult = epubParser.parseEpubMetadataOnly(file)
+                if (epubResult.isFailure) {
+                    return@withContext Result.failure(epubResult.exceptionOrNull() ?: Exception("Failed to parse EPUB"))
+                }
+                
+                val parsed = epubResult.getOrThrow()
+                val parsingTime = System.currentTimeMillis() - startTime
+                
+                // Cache the parsed metadata
+                epubMetadataCacheRepository.cacheMetadata(cacheKey, parsed, parsingTime)
+                
+                parsed
             }
             
-            val parsedEpub = epubResult.getOrThrow()
             val bookId = UUID.randomUUID().toString()
+            
+            // Extract cover art if available
+            val extractedCoverPath = try {
+                val coverResult = epubParser.extractCoverArt(file, bookId, parsedEpub.opfPath)
+                if (coverResult.isSuccess) {
+                    coverResult.getOrNull()
+                } else {
+                    null
+                }
+            } catch (e: Exception) {
+                Log.w("LibraryManager", "Failed to extract cover art: ${e.message}")
+                null
+            }
             
             val book = Book(
                 id = bookId,
@@ -259,7 +432,7 @@ class LibraryManager(
                 language = parsedEpub.metadata.language,
                 isbn = parsedEpub.metadata.isbn,
                 publishedDate = parsedEpub.metadata.publishedDate,
-                coverImagePath = parsedEpub.coverImagePath,
+                coverImagePath = extractedCoverPath,
                 isImported = true,
                 tags = emptyList(),
                 originalMetadataTags = parsedEpub.metadata.subjects
@@ -275,9 +448,7 @@ class LibraryManager(
                 sourceUri = directoryUri // Store the directory URI
             )
             
-            val updatedBooks = _books.value.toMutableList()
-            updatedBooks.add(book)
-            _books.value = updatedBooks
+            bookRepository.insertBook(book)
             
             val updatedImportedFiles = _importedFiles.value.toMutableList()
             updatedImportedFiles.add(importedFile)
@@ -293,12 +464,33 @@ class LibraryManager(
         try {
             _isLoading.value = true
             
-            val parseResult = epubParser.parseEpubMetadataOnly(file)
-            if (parseResult.isFailure) {
-                return@withContext Result.failure(parseResult.exceptionOrNull() ?: Exception("Failed to parse EPUB"))
+            // Use file path as cache key
+            val cacheKey = file.absolutePath.hashCode().toString()
+            
+            // Check cache first
+            val cachedMetadata = epubMetadataCacheRepository.getCachedMetadata(cacheKey)
+            val isValidCache = cachedMetadata != null && epubMetadataCacheRepository.isCacheValid(cacheKey, file.absolutePath)
+            
+            val parsedEpub = if (isValidCache) {
+                Log.d("LibraryManager", "Using cached metadata for ${file.name}")
+                cachedMetadata
+            } else {
+                Log.d("LibraryManager", "Cache miss or invalid, parsing ${file.name}")
+                val startTime = System.currentTimeMillis()
+                val parseResult = epubParser.parseEpubMetadataOnly(file)
+                if (parseResult.isFailure) {
+                    return@withContext Result.failure(parseResult.exceptionOrNull() ?: Exception("Failed to parse EPUB"))
+                }
+                
+                val parsed = parseResult.getOrThrow()
+                val parsingTime = System.currentTimeMillis() - startTime
+                
+                // Cache the parsed metadata
+                epubMetadataCacheRepository.cacheMetadata(cacheKey, parsed, parsingTime)
+                
+                parsed
             }
             
-            val parsedEpub = parseResult.getOrThrow()
             val bookId = UUID.randomUUID().toString()
             
             // For direct imports from temporary files, create a permanent copy
@@ -314,6 +506,20 @@ class LibraryManager(
             } else {
                 // This is already a permanent file path
                 file.absolutePath
+            }
+            
+            // Extract cover art if available (use permanent file path for extraction)
+            val extractedCoverPath = try {
+                val fileToExtractFrom = File(permanentFilePath)
+                val coverResult = epubParser.extractCoverArt(fileToExtractFrom, bookId, parsedEpub.opfPath)
+                if (coverResult.isSuccess) {
+                    coverResult.getOrNull()
+                } else {
+                    null
+                }
+            } catch (e: Exception) {
+                Log.w("LibraryManager", "Failed to extract cover art: ${e.message}")
+                null
             }
             
             // Create Book from parsed EPUB
@@ -332,15 +538,13 @@ class LibraryManager(
                 language = parsedEpub.metadata.language,
                 isbn = parsedEpub.metadata.isbn,
                 publishedDate = parsedEpub.metadata.publishedDate,
-                coverImagePath = parsedEpub.coverImagePath,
+                coverImagePath = extractedCoverPath,
                 isImported = true,
                 originalMetadataTags = parsedEpub.metadata.subjects
             )
             
             // Add to library
-            val updatedBooks = _books.value.toMutableList()
-            updatedBooks.add(book)
-            _books.value = updatedBooks
+            bookRepository.insertBook(book)
             
             // Track imported file as individual import
             val updatedImportedFiles = _importedFiles.value.toMutableList()
@@ -364,7 +568,7 @@ class LibraryManager(
         }
     }
     
-    suspend fun importEpubsFromDirectory(directory: File, recursive: Boolean = true): Result<List<Book>> = withContext(Dispatchers.IO) {
+    suspend fun importEpubsFromDirectory(directory: File, recursive: Boolean = true): Result<List<com.bsikar.helix.data.model.Book>> = withContext(Dispatchers.IO) {
         try {
             _isLoading.value = true
             val importedBooks = mutableListOf<Book>()
@@ -697,29 +901,19 @@ class LibraryManager(
     }
     
     fun updateBookTags(bookId: String, tags: List<String>) {
-        val updatedBooks = _books.value.map { book ->
-            if (book.id == bookId) {
-                book.copy(tags = tags)
-            } else {
-                book
+        scope.launch {
+            val book = bookRepository.getBookById(bookId)
+            if (book != null) {
+                val updatedBook = book.copy(tags = tags)
+                bookRepository.updateBook(updatedBook)
             }
         }
-        
-        _books.value = updatedBooks
-        scope.launch { saveLibrary() }
     }
     
-    fun updateBookSettings(updatedBook: Book) {
-        val updatedBooks = _books.value.map { book ->
-            if (book.id == updatedBook.id) {
-                updatedBook
-            } else {
-                book
-            }
+    fun updateBookSettings(updatedBook: com.bsikar.helix.data.model.Book) {
+        scope.launch {
+            bookRepository.updateBook(updatedBook)
         }
-        
-        _books.value = updatedBooks
-        scope.launch { saveLibrary() }
     }
     
     fun updateBookMetadata(bookId: String, metadataUpdate: com.bsikar.helix.ui.components.BookMetadataUpdate) {
@@ -747,41 +941,57 @@ class LibraryManager(
     }
     
     fun removeBook(bookId: String) {
-        val updatedBooks = _books.value.filter { it.id != bookId }
-        _books.value = updatedBooks
-        scope.launch { saveLibrary() }
-    }
-    
-    fun getBookById(bookId: String): Book? {
-        return _books.value.find { it.id == bookId }
-    }
-    
-    suspend fun getEpubContent(book: Book): ParsedEpub? {
-        if (!book.isImported) {
-            Log.d("LibraryManager", "Book ${book.title} is not imported, skipping EPUB loading")
-            return null
+        scope.launch {
+            // Get book before deletion to invalidate cache
+            val book = bookRepository.getBookById(bookId)
+            book?.let {
+                // Invalidate cache for this book
+                val cacheKey = when {
+                    it.filePath != null -> it.filePath!!.hashCode().toString()
+                    it.originalUri != null -> it.originalUri!!.hashCode().toString()
+                    else -> bookId
+                }
+                epubMetadataCacheRepository.invalidateCache(cacheKey, "Book removed from library")
+            }
+            
+            bookRepository.deleteBook(bookId)
         }
-        
-        Log.d("LibraryManager", "Loading EPUB content for book: ${book.title}")
-        Log.d("LibraryManager", "Book filePath: ${book.filePath}")
-        Log.d("LibraryManager", "Book originalUri: ${book.originalUri}")
-        Log.d("LibraryManager", "Book backupFilePath: ${book.backupFilePath}")
-        
-        return try {
+    }
+    
+    suspend fun getBookById(bookId: String): com.bsikar.helix.data.model.Book? {
+        return bookRepository.getBookById(bookId)
+    }
+    
+    suspend fun getEpubContent(book: com.bsikar.helix.data.model.Book): Result<ParsedEpub?> = withContext(Dispatchers.IO) {
+        try {
+            if (!book.isImported) {
+                Log.d("LibraryManager", "Book ${book.title} is not imported, skipping EPUB loading")
+                return@withContext Result.success(null)
+            }
+            
+            Log.d("LibraryManager", "Loading EPUB content for book: ${book.title}")
+            Log.d("LibraryManager", "Book filePath: ${book.filePath}")
+            Log.d("LibraryManager", "Book originalUri: ${book.originalUri}")
+            Log.d("LibraryManager", "Book backupFilePath: ${book.backupFilePath}")
+            
+            var lastException: Exception? = null
+            
             // Strategy 1: Try original file path first (for direct file imports)
             book.filePath?.let { filePath ->
                 Log.d("LibraryManager", "Trying Strategy 1: file path $filePath")
                 val file = File(filePath)
                 if (file.exists()) {
                     Log.d("LibraryManager", "File exists, parsing...")
-                    val result = epubParser.parseEpub(file).getOrNull()
-                    if (result != null) {
+                    val result = epubParser.parseEpub(file)
+                    if (result.isSuccess) {
                         Log.d("LibraryManager", "Strategy 1 successful")
-                        return result
+                        return@withContext Result.success(result.getOrNull())
                     } else {
-                        Log.w("LibraryManager", "Strategy 1 failed: parseEpub returned null")
+                        lastException = Exception("Strategy 1 failed: ${result.exceptionOrNull()?.message}")
+                        Log.w("LibraryManager", "Strategy 1 failed: parseEpub error: ${result.exceptionOrNull()?.message}")
                     }
                 } else {
+                    lastException = Exception("Strategy 1 failed: file does not exist")
                     Log.w("LibraryManager", "Strategy 1 failed: file does not exist")
                 }
             }
@@ -789,17 +999,13 @@ class LibraryManager(
             // Strategy 2: Try original URI (for SAF-based imports) - use new efficient parser
             book.originalUri?.let { uriString ->
                 Log.d("LibraryManager", "Trying Strategy 2: URI $uriString")
-                try {
-                    val result = epubParser.parseEpubFromUri(context, uriString)
-                    if (result.isSuccess) {
-                        Log.d("LibraryManager", "Strategy 2 successful")
-                        return result.getOrNull()
-                    } else {
-                        Log.w("LibraryManager", "Strategy 2 failed: ${result.exceptionOrNull()?.message}")
-                    }
-                } catch (e: Exception) {
-                    Log.e("LibraryManager", "Strategy 2 exception: ${e.message}", e)
-                    // URI might be invalid or permissions revoked, continue to next strategy
+                val result = epubParser.parseEpubFromUri(context, uriString)
+                if (result.isSuccess) {
+                    Log.d("LibraryManager", "Strategy 2 successful")
+                    return@withContext Result.success(result.getOrNull())
+                } else {
+                    lastException = Exception("Strategy 2 failed: ${result.exceptionOrNull()?.message}")
+                    Log.w("LibraryManager", "Strategy 2 failed: ${result.exceptionOrNull()?.message}")
                 }
             }
             
@@ -809,32 +1015,35 @@ class LibraryManager(
                 val backupFile = File(backupPath)
                 if (backupFile.exists()) {
                     Log.d("LibraryManager", "Backup file exists, parsing...")
-                    val result = epubParser.parseEpub(backupFile).getOrNull()
-                    if (result != null) {
+                    val result = epubParser.parseEpub(backupFile)
+                    if (result.isSuccess) {
                         Log.d("LibraryManager", "Strategy 3 successful")
-                        return result
+                        return@withContext Result.success(result.getOrNull())
                     } else {
-                        Log.w("LibraryManager", "Strategy 3 failed: parseEpub returned null")
+                        lastException = Exception("Strategy 3 failed: ${result.exceptionOrNull()?.message}")
+                        Log.w("LibraryManager", "Strategy 3 failed: parseEpub error: ${result.exceptionOrNull()?.message}")
                     }
                 } else {
+                    lastException = Exception("Strategy 3 failed: backup file does not exist")
                     Log.w("LibraryManager", "Strategy 3 failed: backup file does not exist")
                 }
             }
             
             // All strategies failed
-            Log.e("LibraryManager", "All strategies failed for book: ${book.title}")
-            null
+            val errorMessage = "All strategies failed for book: ${book.title}. Last error: ${lastException?.message}"
+            Log.e("LibraryManager", errorMessage)
+            Result.failure(Exception(errorMessage))
+            
         } catch (e: Exception) {
             Log.e("LibraryManager", "Exception in getEpubContent for book ${book.title}: ${e.message}", e)
-            e.printStackTrace()
-            null
+            Result.failure(e)
         }
     }
     
     /**
      * Get the physical file path for an EPUB book - needed for image rendering
      */
-    fun getEpubFilePath(book: Book): String? {
+    fun getEpubFilePath(book: com.bsikar.helix.data.model.Book): String? {
         // Strategy 1: Direct file path
         book.filePath?.let { filePath ->
             val file = File(filePath)
@@ -936,7 +1145,11 @@ class LibraryManager(
         _books.value = emptyList()
         _watchedDirectories.value = emptyList()
         _importedFiles.value = emptyList()
-        scope.launch { saveLibrary() }
+        scope.launch { 
+            // Clean up all cache entries
+            epubMetadataCacheRepository.cleanupInvalidCaches()
+            saveLibrary() 
+        }
     }
     
     /**
@@ -983,7 +1196,7 @@ class LibraryManager(
         }
     }
     
-    suspend fun rescanWatchedDirectories(): Result<List<Book>> = withContext(Dispatchers.IO) {
+    suspend fun rescanWatchedDirectories(): Result<List<com.bsikar.helix.data.model.Book>> = withContext(Dispatchers.IO) {
         try {
             _isLoading.value = true
             val newBooks = mutableListOf<Book>()
@@ -1059,6 +1272,10 @@ class LibraryManager(
                                         if (fileChecksum != null && existingBook.fileChecksum != null && 
                                             existingBook.fileChecksum != fileChecksum) {
                                             Log.d("LibraryManager", "File changed, updating metadata for: ${existingBook.title}")
+                                            
+                                            // Invalidate cache for the changed file
+                                            val cacheKey = docFile.uri.toString().hashCode().toString()
+                                            epubMetadataCacheRepository.invalidateCache(cacheKey, "File checksum changed during rescan")
                                             
                                             // File has changed - update only if user hasn't edited metadata
                                             if (!existingBook.userEditedMetadata) {

@@ -20,9 +20,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.bsikar.helix.data.Book
-import com.bsikar.helix.data.Tag
-import com.bsikar.helix.data.TagCategory
+import com.bsikar.helix.data.model.Book
+import com.bsikar.helix.data.model.Tag
+import com.bsikar.helix.data.model.TagCategory
 import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.theme.ThemeManager
 import com.bsikar.helix.theme.ThemeMode
@@ -30,6 +30,11 @@ import com.bsikar.helix.ui.components.BookCard
 import com.bsikar.helix.ui.components.InfiniteHorizontalBookScroll
 import com.bsikar.helix.ui.components.SearchBar
 import com.bsikar.helix.ui.components.SearchUtils
+import com.bsikar.helix.ui.components.ResponsiveConfig
+import com.bsikar.helix.ui.components.ResponsiveBookGrid
+import com.bsikar.helix.ui.components.ResponsiveBookCard
+import com.bsikar.helix.ui.components.getWindowSizeClass
+import com.bsikar.helix.ui.components.WindowSizeClass
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -39,14 +44,14 @@ fun BrowseScreen(
     theme: AppTheme,
     onNavigateToSettings: () -> Unit = {},
     onBookClick: (Book) -> Unit = {},
-    onSeeAllClick: (String, List<Book>) -> Unit = { _, _ -> },
-    allBooks: List<Book> = emptyList(),
+    onSeeAllClick: (String, List<com.bsikar.helix.data.model.Book>) -> Unit = { _, _ -> },
+    allBooks: List<com.bsikar.helix.data.model.Book> = emptyList(),
     onStartReading: (String) -> Unit = {},
     onMarkCompleted: (String) -> Unit = {},
     onMoveToPlanToRead: (String) -> Unit = {},
     onSetProgress: (String, Float) -> Unit = { _, _ -> },
     onEditTags: (String, List<String>) -> Unit = { _, _ -> },
-    onUpdateBookSettings: (com.bsikar.helix.data.Book) -> Unit = { _ -> }
+    onUpdateBookSettings: (com.bsikar.helix.data.model.Book) -> Unit = { _ -> }
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var selectedTags by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -58,7 +63,7 @@ fun BrowseScreen(
     var internalAllBooks by remember(allBooksKey) { mutableStateOf(allBooks) }
     
     // Function to update a book in the internal list
-    val updateBookInList = { updatedBook: Book ->
+    val updateBookInList = { updatedBook: com.bsikar.helix.data.model.Book ->
         internalAllBooks = internalAllBooks.map { book ->
             if (book.id == updatedBook.id) updatedBook else book
         }
@@ -67,9 +72,62 @@ fun BrowseScreen(
         onUpdateBookSettings(updatedBook)
     }
     
+    // Responsive configuration
+    val responsiveConfig = ResponsiveConfig.fromScreenWidth()
+    val windowSizeClass = getWindowSizeClass()
+    
+    // Function to render books responsively
+    @Composable
+    fun ResponsiveBrowseSection(
+        books: List<com.bsikar.helix.data.model.Book>
+    ) {
+        when (windowSizeClass) {
+            WindowSizeClass.COMPACT -> {
+                // Use horizontal scroll for phones
+                InfiniteHorizontalScroll(
+                    books = books,
+                    theme = theme,
+                    searchQuery = searchQuery,
+                    onBookClick = onBookClick,
+                    onStartReading = onStartReading,
+                    onMarkCompleted = onMarkCompleted,
+                    onMoveToPlanToRead = onMoveToPlanToRead,
+                    onSetProgress = onSetProgress,
+                    onEditTags = onEditTags,
+                    onUpdateBookSettings = updateBookInList
+                )
+            }
+            WindowSizeClass.MEDIUM, WindowSizeClass.EXPANDED -> {
+                // Use responsive grid for tablets
+                if (books.isNotEmpty()) {
+                    ResponsiveBookGrid(
+                        items = books,
+                        config = responsiveConfig,
+                        key = { book -> book.id }
+                    ) { book ->
+                        ResponsiveBookCard(
+                            book = book,
+                            showProgress = false,
+                            theme = theme,
+                            searchQuery = searchQuery,
+                            config = responsiveConfig,
+                            onBookClick = onBookClick,
+                            onStartReading = onStartReading,
+                            onMarkCompleted = onMarkCompleted,
+                            onMoveToPlanToRead = onMoveToPlanToRead,
+                            onSetProgress = onSetProgress,
+                            onEditTags = onEditTags,
+                            onUpdateBookSettings = updateBookInList
+                        )
+                    }
+                }
+            }
+        }
+    }
+    
     // Organize books by categories - include books without tags
     val featuredBooks = remember(internalAllBooks) {
-        // Featured: Books with specific tags OR high progress OR recently read
+        // Featured: com.bsikar.helix.data.model.Books with specific tags OR high progress OR recently read
         internalAllBooks.filter { book -> 
             book.hasAnyTag(listOf("shounen", "seinen")) || 
             book.progress > 0.5f ||
@@ -78,7 +136,7 @@ fun BrowseScreen(
     }
     
     val popularBooks = remember(internalAllBooks) {
-        // Popular: Books with specific tags OR any imported books (to show something)
+        // Popular: com.bsikar.helix.data.model.Books with specific tags OR any imported books (to show something)
         val taggedBooks = internalAllBooks.filter { book -> 
             book.hasAnyTag(listOf("action", "adventure", "fantasy", "supernatural"))
         }
@@ -92,7 +150,7 @@ fun BrowseScreen(
     }
     
     val newReleases = remember(internalAllBooks) {
-        // New Releases: Books with specific tags OR recently imported books
+        // New Releases: com.bsikar.helix.data.model.Books with specific tags OR recently imported books
         val taggedBooks = internalAllBooks.filter { book -> 
             book.hasAnyTag(listOf("ongoing", "romance", "comedy"))
         }
@@ -292,17 +350,8 @@ fun BrowseScreen(
                     )
                 }
                 item {
-                    InfiniteHorizontalScroll(
-                        books = filteredFeatured,
-                        theme = theme,
-                        searchQuery = searchQuery,
-                        onBookClick = onBookClick,
-                        onStartReading = onStartReading,
-                        onMarkCompleted = onMarkCompleted,
-                        onMoveToPlanToRead = onMoveToPlanToRead,
-                        onSetProgress = onSetProgress,
-                        onEditTags = onEditTags,
-                        onUpdateBookSettings = updateBookInList
+                    ResponsiveBrowseSection(
+                        books = filteredFeatured
                     )
                 }
             }
@@ -317,17 +366,8 @@ fun BrowseScreen(
                     )
                 }
                 item {
-                    InfiniteHorizontalScroll(
-                        books = filteredPopular,
-                        theme = theme,
-                        searchQuery = searchQuery,
-                        onBookClick = onBookClick,
-                        onStartReading = onStartReading,
-                        onMarkCompleted = onMarkCompleted,
-                        onMoveToPlanToRead = onMoveToPlanToRead,
-                        onSetProgress = onSetProgress,
-                        onEditTags = onEditTags,
-                        onUpdateBookSettings = updateBookInList
+                    ResponsiveBrowseSection(
+                        books = filteredPopular
                     )
                 }
             }
@@ -342,17 +382,8 @@ fun BrowseScreen(
                     )
                 }
                 item {
-                    InfiniteHorizontalScroll(
-                        books = filteredNewReleases,
-                        theme = theme,
-                        searchQuery = searchQuery,
-                        onBookClick = onBookClick,
-                        onStartReading = onStartReading,
-                        onMarkCompleted = onMarkCompleted,
-                        onMoveToPlanToRead = onMoveToPlanToRead,
-                        onSetProgress = onSetProgress,
-                        onEditTags = onEditTags,
-                        onUpdateBookSettings = updateBookInList
+                    ResponsiveBrowseSection(
+                        books = filteredNewReleases
                     )
                 }
             }
@@ -408,7 +439,7 @@ fun BrowseSectionHeader(
 
 @Composable
 fun InfiniteHorizontalScroll(
-    books: List<Book>,
+    books: List<com.bsikar.helix.data.model.Book>,
     theme: AppTheme,
     searchQuery: String = "",
     onBookClick: (Book) -> Unit,
@@ -417,7 +448,7 @@ fun InfiniteHorizontalScroll(
     onMoveToPlanToRead: (String) -> Unit = {},
     onSetProgress: (String, Float) -> Unit = { _, _ -> },
     onEditTags: (String, List<String>) -> Unit = { _, _ -> },
-    onUpdateBookSettings: (com.bsikar.helix.data.Book) -> Unit = { _ -> }
+    onUpdateBookSettings: (com.bsikar.helix.data.model.Book) -> Unit = { _ -> }
 ) {
     // Use the new circular implementation from BookSection
     InfiniteHorizontalBookScroll(
@@ -437,7 +468,7 @@ fun InfiniteHorizontalScroll(
 }
 
 // Helper function to filter books by multiple tags
-private fun filterBooksByTags(books: List<Book>, searchQuery: String, selectedTags: Set<String>): List<Book> {
+private fun filterBooksByTags(books: List<com.bsikar.helix.data.model.Book>, searchQuery: String, selectedTags: Set<String>): List<com.bsikar.helix.data.model.Book> {
     // First filter by tags
     val tagFiltered = if (selectedTags.isEmpty()) {
         books

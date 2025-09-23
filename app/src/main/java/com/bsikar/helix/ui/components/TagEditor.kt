@@ -38,15 +38,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.bsikar.helix.data.Book
-import com.bsikar.helix.data.Tag
-import com.bsikar.helix.data.TagCategory
-import com.bsikar.helix.data.PresetTags
+import com.bsikar.helix.data.model.Book
+import com.bsikar.helix.data.model.Tag
+import com.bsikar.helix.data.model.TagCategory
+import com.bsikar.helix.data.model.PresetTags
 import com.bsikar.helix.theme.AppTheme
 
 @Composable
 fun TagEditorDialog(
-    book: Book,
+    book: com.bsikar.helix.data.model.Book,
     theme: AppTheme,
     onDismiss: () -> Unit,
     onTagsUpdated: (List<String>) -> Unit

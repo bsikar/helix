@@ -11,14 +11,25 @@ data class ReaderSettings(
     val fontFamily: String = "Default",
     val textAlign: TextAlignment = TextAlignment.JUSTIFY,
     val marginHorizontal: Int = 24, // Horizontal margin in dp
-    val marginVertical: Int = 16 // Vertical margin in dp
+    val marginVertical: Int = 16, // Vertical margin in dp
+    // Accessibility features
+    val useSystemFontSize: Boolean = false, // Follow system font size
+    val highContrast: Boolean = false, // High contrast mode
+    val letterSpacing: Float = 0.0f, // Letter spacing in em units
+    val wordSpacing: Float = 1.0f, // Word spacing multiplier
+    val animationsEnabled: Boolean = true, // Enable/disable animations
+    val useSystemTheme: Boolean = false // Follow system dark/light theme
 )
 
-enum class ReadingMode(val displayName: String, val backgroundColor: Color, val textColor: Color) {
+enum class ReadingMode(val displayName: String, val backgroundColor: Color, val textColor: Color, val isHighContrast: Boolean = false) {
     LIGHT("Light", Color(0xFFFFFFFF), Color(0xFF000000)),
     SEPIA("Sepia", Color(0xFFF7F3E9), Color(0xFF5D4E37)),
     DARK("Dark", Color(0xFF1C1C1E), Color(0xFFFFFFFF)),
-    BLACK("Black", Color(0xFF000000), Color(0xFFFFFFFF))
+    BLACK("Black", Color(0xFF000000), Color(0xFFFFFFFF)),
+    // High contrast modes for accessibility
+    HIGH_CONTRAST_LIGHT("High Contrast Light", Color(0xFFFFFFFF), Color(0xFF000000), true),
+    HIGH_CONTRAST_DARK("High Contrast Dark", Color(0xFF000000), Color(0xFFFFFFFF), true),
+    HIGH_CONTRAST_YELLOW("High Contrast Yellow", Color(0xFFFFFF00), Color(0xFF000000), true)
 }
 
 enum class TextAlignment(val displayName: String) {
@@ -71,6 +82,54 @@ data class ReaderPreset(
                         textAlign = TextAlignment.JUSTIFY,
                         marginHorizontal = 32,
                         marginVertical = 24
+                    ),
+                    isCustom = false
+                ),
+                // Accessibility presets
+                ReaderPreset(
+                    name = "Large Text",
+                    settings = ReaderSettings(
+                        fontSize = 24,
+                        lineHeight = 2.0f,
+                        brightness = 1.0f,
+                        readingMode = ReadingMode.LIGHT,
+                        textAlign = TextAlignment.LEFT,
+                        marginHorizontal = 40,
+                        marginVertical = 32,
+                        letterSpacing = 0.05f,
+                        wordSpacing = 1.2f
+                    ),
+                    isCustom = false
+                ),
+                ReaderPreset(
+                    name = "High Contrast",
+                    settings = ReaderSettings(
+                        fontSize = 18,
+                        lineHeight = 1.8f,
+                        brightness = 1.0f,
+                        readingMode = ReadingMode.HIGH_CONTRAST_LIGHT,
+                        textAlign = TextAlignment.LEFT,
+                        marginHorizontal = 32,
+                        marginVertical = 24,
+                        highContrast = true,
+                        letterSpacing = 0.02f,
+                        animationsEnabled = false
+                    ),
+                    isCustom = false
+                ),
+                ReaderPreset(
+                    name = "Dyslexia Friendly",
+                    settings = ReaderSettings(
+                        fontSize = 20,
+                        lineHeight = 2.2f,
+                        brightness = 0.95f,
+                        readingMode = ReadingMode.SEPIA,
+                        textAlign = TextAlignment.LEFT,
+                        marginHorizontal = 48,
+                        marginVertical = 36,
+                        letterSpacing = 0.08f,
+                        wordSpacing = 1.5f,
+                        fontFamily = "OpenDyslexic"
                     ),
                     isCustom = false
                 )

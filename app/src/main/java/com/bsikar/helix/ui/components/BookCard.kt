@@ -14,19 +14,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.bsikar.helix.data.Book
-import com.bsikar.helix.data.ReadingStatus
-import com.bsikar.helix.data.CoverDisplayMode
+import coil.compose.AsyncImage
+import com.bsikar.helix.data.model.Book
+import com.bsikar.helix.data.model.ReadingStatus
+import com.bsikar.helix.data.model.CoverDisplayMode
 import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.ui.components.SearchUtils
+import java.io.File
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun BookCard(
-    book: Book, 
+    book: com.bsikar.helix.data.model.Book, 
     showProgress: Boolean, 
     theme: AppTheme,
     searchQuery: String = "",
@@ -56,7 +59,17 @@ fun BookCard(
                 .clip(RoundedCornerShape(8.dp))
                 .background(book.getEffectiveCoverColor())
         ) {
-            // TODO: Add actual cover art image display when shouldShowCoverArt() is true
+            // Display cover art if available and display mode allows it
+            if (book.shouldShowCoverArt() && !book.coverImagePath.isNullOrBlank()) {
+                AsyncImage(
+                    model = File(book.coverImagePath),
+                    contentDescription = "Book cover",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                    fallback = null, // Fall back to background color when image fails
+                    error = null // Show background color on error
+                )
+            }
             // Status indicator in top-right corner
             val statusColor = when (book.readingStatus) {
                 ReadingStatus.PLAN_TO_READ -> theme.secondaryTextColor.copy(alpha = 0.7f)

@@ -23,9 +23,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.bsikar.helix.data.Book
-import com.bsikar.helix.data.BookRepository
-import com.bsikar.helix.data.ReadingStatus
+import com.bsikar.helix.data.model.Book
+import com.bsikar.helix.data.repository.BookRepository
+import com.bsikar.helix.data.model.ReadingStatus
 import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.theme.ThemeManager
 import com.bsikar.helix.theme.ThemeMode
@@ -39,7 +39,7 @@ fun RecentsScreen(
     selectedTab: Int = 1,
     onTabSelected: (Int) -> Unit = {},
     theme: AppTheme,
-    recentBooks: List<Book>,
+    recentBooks: List<com.bsikar.helix.data.model.Book>,
     onNavigateToSettings: () -> Unit = {},
     onBookClick: (Book) -> Unit = {},
     onStartReading: (String) -> Unit = {},
@@ -280,7 +280,7 @@ fun SortOptionsRow(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun RecentBookItem(
-    book: Book,
+    book: com.bsikar.helix.data.model.Book,
     theme: AppTheme,
     searchQuery: String = "",
     onBookClick: () -> Unit,
@@ -550,7 +550,7 @@ fun RecentsScreenPreview() {
         RecentsScreen(
             selectedTab = 1,
             theme = theme,
-            recentBooks = BookRepository.getRecentBooks(),
+            recentBooks = emptyList(),
             onNavigateToSettings = { },
             onBookClick = { }
         )

@@ -2,12 +2,20 @@ package com.bsikar.helix.data
 
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.Before
+import com.bsikar.helix.data.model.TagMatcher
+import com.bsikar.helix.data.model.PresetTags
 
 /**
  * Test demonstrating improvements in the hybrid tag matching algorithm
  * compared to the previous Jaccard-only approach
  */
 class TagMatcherImprovementTest {
+    
+    @Before
+    fun setup() {
+        PresetTags.initializeForTesting()
+    }
 
     @Test
     fun `test algorithm works without crashing`() {

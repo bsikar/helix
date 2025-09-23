@@ -1,11 +1,22 @@
 package com.bsikar.helix.ui.screens
 
 import androidx.compose.runtime.*
-import com.bsikar.helix.data.Book
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.bsikar.helix.R
+import com.bsikar.helix.data.model.Book
+import com.bsikar.helix.data.model.UiState
 import com.bsikar.helix.data.UserPreferencesManager
 import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.theme.ThemeMode
 import com.bsikar.helix.viewmodels.LibraryViewModel
+import com.bsikar.helix.viewmodels.ReaderViewModel
 
 @Composable
 fun MainApp(
@@ -19,14 +30,41 @@ fun MainApp(
     var showSettings by remember { mutableStateOf(false) }
     var settingsScrollTarget by remember { mutableStateOf<String?>(null) }
     var currentBook by remember { mutableStateOf<Book?>(null) }
-    var seeAllData by remember { mutableStateOf<Pair<String, List<Book>>?>(null) }
+    var seeAllData by remember { mutableStateOf<Pair<String, List<com.bsikar.helix.data.model.Book>>?>(null) }
 
-    // Collect states from ViewModel
+    // Collect states from ViewModel - use filtered results for search functionality
     val allBooks by libraryViewModel.allBooks.collectAsState()
-    val readingBooks by libraryViewModel.readingBooks.collectAsState()
-    val planToReadBooks by libraryViewModel.planToReadBooks.collectAsState()
-    val completedBooks by libraryViewModel.completedBooks.collectAsState()
+    val readingBooks by libraryViewModel.filteredReadingBooks.collectAsState()
+    val planToReadBooks by libraryViewModel.filteredPlanToReadBooks.collectAsState()
+    val completedBooks by libraryViewModel.filteredCompletedBooks.collectAsState()
     val recentBooks by libraryViewModel.recentBooks.collectAsState()
+    val libraryState by libraryViewModel.libraryState.collectAsState()
+    val errorMessage by libraryViewModel.errorMessage.collectAsState()
+    val searchQuery by libraryViewModel.searchQuery.collectAsState()
+
+    // Handle global library state (for operations like imports/scans)
+    when (libraryState) {
+        is UiState.Loading -> {
+            // Show loading overlay only for critical operations
+            // The individual book states are still available for display
+        }
+        is UiState.Error -> {
+            // Show error snackbar or dialog
+            LaunchedEffect(libraryState) {
+                // Error is handled, could show a snackbar here
+            }
+        }
+        is UiState.Success -> {
+            // Success state, continue with normal UI
+        }
+    }
+
+    // Show error message if present
+    errorMessage?.let { message ->
+        LaunchedEffect(message) {
+            // Could show snackbar for the error message
+        }
+    }
 
     when {
         showSettings -> {
@@ -55,6 +93,7 @@ fun MainApp(
             )
         }
         currentBook != null -> {
+            val readerViewModel: ReaderViewModel = hiltViewModel()
             ReaderScreen(
                 book = currentBook!!,
                 theme = theme,
@@ -69,7 +108,8 @@ fun MainApp(
                     currentBook = updatedBook  // Update the currentBook state immediately
                 },
                 preferencesManager = preferencesManager,
-                libraryManager = libraryViewModel.libraryManager
+                libraryManager = libraryViewModel.libraryManager,
+                readerViewModel = readerViewModel
             )
         }
         else -> {
@@ -99,7 +139,11 @@ fun MainApp(
                     onSetProgress = { bookId, progress -> libraryViewModel.setBookProgress(bookId, progress) },
                     onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) },
                     onUpdateBookSettings = { book -> libraryViewModel.updateBookSettings(book) },
-                    libraryManager = libraryViewModel.libraryManager
+                    libraryManager = libraryViewModel.libraryManager,
+                    libraryState = libraryState,
+                    errorMessage = errorMessage,
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = { query -> libraryViewModel.updateSearchQuery(query) }
                 )
                 1 -> RecentsScreen(
                     selectedTab = selectedTab,
@@ -154,7 +198,11 @@ fun MainApp(
                     onSetProgress = { bookId, progress -> libraryViewModel.setBookProgress(bookId, progress) },
                     onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) },
                     onUpdateBookSettings = { book -> libraryViewModel.updateBookSettings(book) },
-                    libraryManager = libraryViewModel.libraryManager
+                    libraryManager = libraryViewModel.libraryManager,
+                    libraryState = libraryState,
+                    errorMessage = errorMessage,
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = { query -> libraryViewModel.updateSearchQuery(query) }
                 )
             }
         }

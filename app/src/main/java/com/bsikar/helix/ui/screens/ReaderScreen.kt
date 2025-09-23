@@ -29,7 +29,14 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
-import com.bsikar.helix.data.Book
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.ui.text.TextStyle
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.bsikar.helix.data.model.Book
 import com.bsikar.helix.data.ReaderSettings
 import com.bsikar.helix.data.ReadingMode
 import com.bsikar.helix.data.TextAlignment
@@ -39,10 +46,12 @@ import com.bsikar.helix.theme.ThemeManager
 import com.bsikar.helix.theme.ThemeMode
 import com.bsikar.helix.ui.components.SearchUtils
 import com.bsikar.helix.ui.components.BookmarkDialog
-import com.bsikar.helix.data.Bookmark
+import com.bsikar.helix.ui.components.ChapterNavigationSheet
+import com.bsikar.helix.data.model.Bookmark
 import com.bsikar.helix.data.LibraryManager
-import com.bsikar.helix.data.ParsedEpub
+import com.bsikar.helix.data.model.ParsedEpub
 import com.bsikar.helix.data.EpubParser
+import com.bsikar.helix.viewmodels.ReaderViewModel
 import org.jsoup.Jsoup
 import coil.compose.AsyncImage
 import com.bsikar.helix.ui.components.EpubImageComponent
@@ -63,22 +72,34 @@ sealed class ContentElement {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ReaderScreen(
-    book: Book,
+    book: com.bsikar.helix.data.model.Book,
     theme: AppTheme,
     onBackClick: () -> Unit,
     onUpdateReadingPosition: (String, Int, Int, Int) -> Unit,
     onUpdateBookSettings: (Book) -> Unit = { _ -> },
     preferencesManager: UserPreferencesManager,
-    libraryManager: LibraryManager
+    libraryManager: LibraryManager,
+    readerViewModel: ReaderViewModel = hiltViewModel()
 ) {
     var currentPage by remember { mutableIntStateOf(book.currentPage) }
     var showSettings by remember { mutableStateOf(false) }
     var showChapterDialog by remember { mutableStateOf(false) }
     var showBookmarkDialog by remember { mutableStateOf(false) }
-    // Note: Scroll position tracking temporarily removed due to LazyColumn implementation
+    val context = LocalContext.current
     
-    // State for EPUB content
-    var parsedEpub by remember { mutableStateOf<ParsedEpub?>(null) }
+    // State from ReaderViewModel
+    val parsedEpub by readerViewModel.parsedEpub.collectAsState()
+    val currentContent by readerViewModel.currentContent.collectAsState()
+    val isLoadingContent by readerViewModel.isLoadingContent.collectAsState()
+    val isLoadingChapter by readerViewModel.isLoadingChapter.collectAsState()
+    val loadingError by readerViewModel.loadingError.collectAsState()
+    val currentChapterIndex by readerViewModel.currentChapterIndex.collectAsState()
+    
+    // Chapter navigation state
+    val chapters by readerViewModel.chapters.collectAsState()
+    val tableOfContents by readerViewModel.tableOfContents.collectAsState()
+    val currentChapter by readerViewModel.currentChapter.collectAsState()
+    val readingProgressPercentage by readerViewModel.readingProgressPercentage.collectAsState()
     
     // Use dynamic chapter count for imported EPUBs - ensure non-zero value during loading
     val totalPages = remember(parsedEpub, book.totalPages) {
@@ -88,8 +109,6 @@ fun ReaderScreen(
             maxOf(1, book.totalPages)
         }
     }
-    var isLoadingContent by remember { mutableStateOf(false) }
-    var currentChapterIndex by remember { mutableIntStateOf((book.currentChapter - 1).coerceAtLeast(0)) }
     
     // Get bookmarks for this book
     val bookmarks by remember { derivedStateOf { preferencesManager.getBookmarks(book.id) } }
@@ -103,18 +122,18 @@ fun ReaderScreen(
     val userPreferences by preferencesManager.preferences
     var readerSettings by remember { mutableStateOf(userPreferences.selectedReaderSettings) }
     
-    // Update settings when preferences change
+    // Update settings when preferences change and invalidate content cache
     LaunchedEffect(userPreferences.selectedReaderSettings) {
-        readerSettings = userPreferences.selectedReaderSettings
+        val newSettings = userPreferences.selectedReaderSettings
+        if (readerSettings != newSettings) {
+            readerSettings = newSettings
+            readerViewModel.invalidateContentCache()
+        }
     }
     
-    // Load EPUB content when book changes
+    // Load book content when book changes
     LaunchedEffect(book.id) {
-        if (book.isImported) {
-            isLoadingContent = true
-            parsedEpub = libraryManager.getEpubContent(book)
-            isLoadingContent = false
-        }
+        readerViewModel.loadBook(book)
     }
     
     // Save reading position when page or chapter changes
@@ -123,7 +142,7 @@ fun ReaderScreen(
     }
     
     // Get chapters from parsed EPUB or use sample chapters for non-imported books
-    val chapters = remember(parsedEpub) {
+    val chapterTitles = remember(parsedEpub) {
         if (book.isImported && parsedEpub != null) {
             parsedEpub!!.chapters.map { it.title }
         } else {
@@ -143,87 +162,11 @@ fun ReaderScreen(
         }
     }
     
-    // State for lazy-loaded chapter content
-    var currentContent by remember { mutableStateOf<List<ContentElement>>(emptyList()) }
-    var isLoadingChapter by remember { mutableStateOf(true) }
-    val context = LocalContext.current
-    
-    // Load chapter content on demand
+    // Load chapter content when EPUB is loaded or chapter changes
     LaunchedEffect(parsedEpub, currentChapterIndex) {
-        isLoadingChapter = true
-        isLoadingContent = true
-        
-        if (book.isImported) {
-            parsedEpub?.let { epub ->
-                val chapter = epub.chapters.getOrNull(currentChapterIndex)
-                if (chapter != null) {
-                    // Check if content is already loaded
-                    if (chapter.content.isNotEmpty()) {
-                        // Content already available (legacy)
-                        currentContent = parseHtmlToContentElements(chapter.content, readerSettings, epub.images)
-                    } else {
-                        // Load content on demand - handle both file paths and URIs
-                        val epubParser = EpubParser(context)
-                        val contentResult = if (book.originalUri != null) {
-                            // Use URI-based loading for SAF imports
-                            epubParser.loadChapterContentFromUri(
-                                context = context,
-                                uri = book.originalUri!!,
-                                chapterHref = chapter.href,
-                                opfPath = epub.opfPath
-                            )
-                        } else if (epub.filePath != null) {
-                            // Use file-based loading for direct file imports
-                            epubParser.loadChapterContent(
-                                epubFilePath = epub.filePath!!,
-                                chapterHref = chapter.href,
-                                opfPath = epub.opfPath
-                            )
-                        } else {
-                            // Fallback: try to use originalUri if no file path
-                            book.originalUri?.let { uri ->
-                                epubParser.loadChapterContentFromUri(
-                                    context = context,
-                                    uri = uri,
-                                    chapterHref = chapter.href,
-                                    opfPath = epub.opfPath
-                                )
-                            } ?: Result.failure(Exception("No file path or URI available"))
-                        }
-                        
-                        if (contentResult.isSuccess) {
-                            val chapterContent = contentResult.getOrThrow()
-                            currentContent = parseHtmlToContentElements(chapterContent, readerSettings, epub.images)
-                        } else {
-                            currentContent = listOf(ContentElement.TextElement(
-                                androidx.compose.ui.text.AnnotatedString("Error loading chapter: ${contentResult.exceptionOrNull()?.message}")
-                            ))
-                        }
-                    }
-                } else {
-                    currentContent = listOf(ContentElement.TextElement(
-                        androidx.compose.ui.text.AnnotatedString("Chapter not found")
-                    ))
-                }
-            } ?: run {
-                currentContent = listOf(ContentElement.TextElement(
-                    androidx.compose.ui.text.AnnotatedString("EPUB not loaded")
-                ))
-            }
-        } else {
-            // Placeholder for non-imported books
-            val placeholderText = androidx.compose.ui.text.buildAnnotatedString {
-                pushStyle(androidx.compose.ui.text.SpanStyle(
-                    fontSize = readerSettings.fontSize.sp,
-                    fontWeight = FontWeight.Medium
-                ))
-                append("This book needs to be imported as an EPUB file to view its content.")
-            }
-            currentContent = listOf(ContentElement.TextElement(placeholderText))
+        if (book.isImported && parsedEpub != null) {
+            readerViewModel.loadChapterContent(parsedEpub!!, currentChapterIndex, context)
         }
-        
-        isLoadingChapter = false
-        isLoadingContent = false
     }
 
     if (showSettings) {
@@ -240,8 +183,13 @@ fun ReaderScreen(
         return
     }
     
-    // Apply brightness to background color
-    val adjustedBackgroundColor = applyBrightness(readerSettings.readingMode.backgroundColor, readerSettings.brightness)
+    // Apply brightness to background color with accessibility support
+    val baseBackgroundColor = if (theme.isReaderOptimized) {
+        theme.readerBackgroundColor
+    } else {
+        getAccessibleBackgroundColor(readerSettings)
+    }
+    val adjustedBackgroundColor = applyBrightness(baseBackgroundColor, readerSettings.brightness)
 
     Scaffold(
         containerColor = adjustedBackgroundColor,
@@ -352,7 +300,7 @@ fun ReaderScreen(
                 onPreviousPage = { 
                     if (book.isImported && parsedEpub != null) {
                         // Chapter-based navigation for EPUBs
-                        if (currentChapterIndex > 0) currentChapterIndex--
+                        readerViewModel.previousChapter(context)
                     } else {
                         // Page-based navigation for non-imported books
                         if (currentPage > 1) currentPage--
@@ -361,7 +309,7 @@ fun ReaderScreen(
                 onNextPage = { 
                     if (book.isImported && parsedEpub != null) {
                         // Chapter-based navigation for EPUBs
-                        if (currentChapterIndex < totalPages - 1) currentChapterIndex++
+                        readerViewModel.nextChapter(context)
                     } else {
                         // Page-based navigation for non-imported books
                         if (currentPage < totalPages) currentPage++
@@ -406,6 +354,49 @@ fun ReaderScreen(
                         color = theme.accentColor
                     )
                 }
+            } else if (loadingError != null) {
+                // Show error message
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Text(
+                            text = "Failed to load book content",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Text(
+                            text = loadingError!!,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
+                    }
+                }
+            } else if (!book.isImported) {
+                // Show placeholder for non-imported books
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(
+                            horizontal = readerSettings.marginHorizontal.dp,
+                            vertical = readerSettings.marginVertical.dp
+                        ),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    val textStyle = createAccessibleTextStyle(readerSettings)
+                    Text(
+                        text = "This book needs to be imported as an EPUB file to view its content.",
+                        style = textStyle,
+                        textAlign = TextAlign.Center
+                    )
+                }
             } else {
                 // Create a stable snapshot of content to prevent concurrent modification crashes
                 val stableContent = remember(currentContent) { currentContent.toList() }
@@ -427,11 +418,10 @@ fun ReaderScreen(
                             val element = stableContent[index]
                             when (element) {
                                 is ContentElement.TextElement -> {
+                                    val textStyle = createAccessibleTextStyle(readerSettings)
                                     Text(
                                         text = element.text,
-                                        fontSize = readerSettings.fontSize.sp,
-                                        lineHeight = (readerSettings.fontSize * readerSettings.lineHeight).sp,
-                                        color = readerSettings.readingMode.textColor,
+                                        style = textStyle,
                                         textAlign = when (readerSettings.textAlign) {
                                             TextAlignment.LEFT -> TextAlign.Start
                                             TextAlignment.CENTER -> TextAlign.Center
@@ -476,19 +466,19 @@ fun ReaderScreen(
         }
     }
     
-    // Chapter selection dialog
+    // Chapter navigation sheet
     if (showChapterDialog) {
-        ChapterSelectionDialog(
+        ChapterNavigationSheet(
             chapters = chapters,
-            currentChapter = currentChapterIndex + 1, // Convert 0-based to 1-based for display
-            onChapterSelected = { chapterIndex ->
-                // Navigate to selected chapter
-                currentChapterIndex = chapterIndex
+            tableOfContents = tableOfContents,
+            currentChapter = currentChapter,
+            readingProgress = readingProgressPercentage,
+            onChapterSelect = { chapter ->
+                readerViewModel.navigateToChapter(chapter)
                 currentPage = 1 // Reset to first page of chapter
                 showChapterDialog = false
             },
-            onDismiss = { showChapterDialog = false },
-            theme = theme
+            onDismiss = { showChapterDialog = false }
         )
     }
     
@@ -971,9 +961,11 @@ private fun parseElementRecursive(
     when (node.tagName().lowercase()) {
         "h1" -> {
             builder.append("\n\n")
+            val fontSizeMultiplier = if (readerSettings.useSystemFontSize) 2.0f else 1.8f
             builder.pushStyle(androidx.compose.ui.text.SpanStyle(
-                fontSize = (readerSettings.fontSize * 1.8f).sp,
-                fontWeight = FontWeight.Bold
+                fontSize = (readerSettings.fontSize * fontSizeMultiplier).sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = readerSettings.letterSpacing.sp
             ))
             parseTextContent(node, builder, readerSettings, images)
             builder.pop()
@@ -981,9 +973,11 @@ private fun parseElementRecursive(
         }
         "h2" -> {
             builder.append("\n\n")
+            val fontSizeMultiplier = if (readerSettings.useSystemFontSize) 1.8f else 1.6f
             builder.pushStyle(androidx.compose.ui.text.SpanStyle(
-                fontSize = (readerSettings.fontSize * 1.6f).sp,
-                fontWeight = FontWeight.Bold
+                fontSize = (readerSettings.fontSize * fontSizeMultiplier).sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = readerSettings.letterSpacing.sp
             ))
             parseTextContent(node, builder, readerSettings, images)
             builder.pop()
@@ -1266,6 +1260,81 @@ private fun parseElement(
     }
 }
 
+/**
+ * Creates an accessible text style based on reader settings and system preferences
+ */
+@Composable
+private fun createAccessibleTextStyle(
+    readerSettings: ReaderSettings,
+    baseSize: Float = 1.0f
+): TextStyle {
+    val configuration = LocalConfiguration.current
+    val density = LocalDensity.current
+    
+    // Calculate effective font size
+    val effectiveFontSize = if (readerSettings.useSystemFontSize) {
+        // Use system font scale
+        val systemFontScale = configuration.fontScale
+        (readerSettings.fontSize * baseSize * systemFontScale).sp
+    } else {
+        (readerSettings.fontSize * baseSize).sp
+    }
+    
+    // Choose font family
+    val fontFamily = when (readerSettings.fontFamily) {
+        "OpenDyslexic" -> FontFamily.Serif // Fallback until OpenDyslexic is added
+        "Serif" -> FontFamily.Serif
+        "SansSerif" -> FontFamily.SansSerif
+        "Monospace" -> FontFamily.Monospace
+        else -> FontFamily.Default
+    }
+    
+    // Calculate letter spacing
+    val letterSpacing = readerSettings.letterSpacing
+    
+    // Determine text color based on high contrast settings
+    val textColor = if (readerSettings.highContrast) {
+        when (readerSettings.readingMode) {
+            ReadingMode.LIGHT, ReadingMode.SEPIA -> Color.Black
+            ReadingMode.DARK, ReadingMode.BLACK -> Color.White
+            ReadingMode.HIGH_CONTRAST_LIGHT -> Color.Black
+            ReadingMode.HIGH_CONTRAST_DARK -> Color.White
+            ReadingMode.HIGH_CONTRAST_YELLOW -> Color.Black
+        }
+    } else {
+        readerSettings.readingMode.textColor
+    }
+    
+    return TextStyle(
+        fontSize = effectiveFontSize,
+        lineHeight = (effectiveFontSize.value * readerSettings.lineHeight).sp,
+        fontFamily = fontFamily,
+        color = textColor,
+        letterSpacing = letterSpacing.sp,
+        lineHeightStyle = LineHeightStyle(
+            alignment = LineHeightStyle.Alignment.Proportional,
+            trim = LineHeightStyle.Trim.None
+        )
+    )
+}
+
+/**
+ * Gets the background color for accessibility modes
+ */
+@Composable
+private fun getAccessibleBackgroundColor(readerSettings: ReaderSettings): Color {
+    return if (readerSettings.highContrast) {
+        when (readerSettings.readingMode) {
+            ReadingMode.LIGHT, ReadingMode.SEPIA -> Color.White
+            ReadingMode.DARK, ReadingMode.BLACK -> Color.Black
+            ReadingMode.HIGH_CONTRAST_LIGHT -> Color.White
+            ReadingMode.HIGH_CONTRAST_DARK -> Color.Black
+            ReadingMode.HIGH_CONTRAST_YELLOW -> Color(0xFFFFFF00)
+        }
+    } else {
+        readerSettings.readingMode.backgroundColor
+    }
+}
 
 @Preview(showBackground = true)
 @Composable
@@ -1285,8 +1354,8 @@ fun ReaderScreenPreview() {
             onBackClick = { },
             onUpdateReadingPosition = { _, _, _, _ -> },
             onUpdateBookSettings = { _ -> },
-            preferencesManager = UserPreferencesManager(androidx.compose.ui.platform.LocalContext.current),
-            libraryManager = LibraryManager(androidx.compose.ui.platform.LocalContext.current, UserPreferencesManager(androidx.compose.ui.platform.LocalContext.current))
+            preferencesManager = TODO("Preview requires dependency injection"),
+            libraryManager = TODO("Preview requires dependency injection")
         )
     }
 }

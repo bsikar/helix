@@ -16,14 +16,15 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
+import com.bsikar.helix.data.repository.BookmarkRepository
 
 data class UserPreferences(
     val themeMode: ThemeMode = ThemeMode.LIGHT,
     val selectedReaderSettings: ReaderSettings = ReaderSettings(),
     val savedCustomPresets: List<ReaderPreset?> = listOf(null, null, null),
     val currentPresetName: String? = null,
-    val lastSelectedPresetType: PresetType = PresetType.DEFAULT,
-    val bookmarks: List<Bookmark> = emptyList()
+    val lastSelectedPresetType: PresetType = PresetType.DEFAULT
+    // Note: bookmarks are now managed by BookmarkRepository, not stored in preferences
 )
 
 enum class PresetType {
@@ -33,7 +34,10 @@ enum class PresetType {
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "user_preferences")
 
-class UserPreferencesManager(private val context: Context) {
+class UserPreferencesManager(
+    private val context: Context,
+    private val bookmarkRepository: BookmarkRepository
+) {
     private val scope = CoroutineScope(Dispatchers.IO)
     
     private val _preferences = mutableStateOf<UserPreferences?>(null)
@@ -56,6 +60,14 @@ class UserPreferencesManager(private val context: Context) {
         val MARGIN_VERTICAL = intPreferencesKey("margin_vertical")
         val CURRENT_PRESET_NAME = stringPreferencesKey("current_preset_name")
         val LAST_SELECTED_PRESET_TYPE = stringPreferencesKey("last_selected_preset_type")
+        
+        // Accessibility settings
+        val USE_SYSTEM_FONT_SIZE = booleanPreferencesKey("use_system_font_size")
+        val HIGH_CONTRAST = booleanPreferencesKey("high_contrast")
+        val LETTER_SPACING = floatPreferencesKey("letter_spacing")
+        val WORD_SPACING = floatPreferencesKey("word_spacing")
+        val ANIMATIONS_ENABLED = booleanPreferencesKey("animations_enabled")
+        val USE_SYSTEM_THEME = booleanPreferencesKey("use_system_theme")
         
         val CUSTOM_PRESET_1_NAME = stringPreferencesKey("custom_preset_1_name")
         val CUSTOM_PRESET_1_FONT_SIZE = intPreferencesKey("custom_preset_1_font_size")
@@ -87,7 +99,6 @@ class UserPreferencesManager(private val context: Context) {
         val CUSTOM_PRESET_3_MARGIN_H = intPreferencesKey("custom_preset_3_margin_h")
         val CUSTOM_PRESET_3_MARGIN_V = intPreferencesKey("custom_preset_3_margin_v")
         
-        val BOOKMARKS = stringPreferencesKey("bookmarks")
         val LIBRARY_DATA = stringPreferencesKey("library_data")
         val WATCHED_DIRECTORIES = stringPreferencesKey("watched_directories")
         val IMPORTED_FILES = stringPreferencesKey("imported_files")
@@ -139,7 +150,14 @@ class UserPreferencesManager(private val context: Context) {
                 preferences[PreferenceKeys.TEXT_ALIGN] ?: TextAlignment.JUSTIFY.name
             ),
             marginHorizontal = preferences[PreferenceKeys.MARGIN_HORIZONTAL] ?: 24,
-            marginVertical = preferences[PreferenceKeys.MARGIN_VERTICAL] ?: 16
+            marginVertical = preferences[PreferenceKeys.MARGIN_VERTICAL] ?: 16,
+            // Accessibility settings
+            useSystemFontSize = preferences[PreferenceKeys.USE_SYSTEM_FONT_SIZE] ?: false,
+            highContrast = preferences[PreferenceKeys.HIGH_CONTRAST] ?: false,
+            letterSpacing = preferences[PreferenceKeys.LETTER_SPACING] ?: 0.0f,
+            wordSpacing = preferences[PreferenceKeys.WORD_SPACING] ?: 1.0f,
+            animationsEnabled = preferences[PreferenceKeys.ANIMATIONS_ENABLED] ?: true,
+            useSystemTheme = preferences[PreferenceKeys.USE_SYSTEM_THEME] ?: false
         )
         
         val customPresets = listOf(
@@ -153,22 +171,12 @@ class UserPreferencesManager(private val context: Context) {
             preferences[PreferenceKeys.LAST_SELECTED_PRESET_TYPE] ?: PresetType.DEFAULT.name
         )
         
-        // Load bookmarks from DataStore
-        val bookmarks = try {
-            val bookmarksJson = preferences[PreferenceKeys.BOOKMARKS] ?: "[]"
-            Json.decodeFromString<List<Bookmark>>(bookmarksJson)
-        } catch (e: Exception) {
-            e.printStackTrace()
-            emptyList<Bookmark>()
-        }
-        
         _preferences.value = UserPreferences(
             themeMode = themeMode,
             selectedReaderSettings = readerSettings,
             savedCustomPresets = customPresets,
             currentPresetName = currentPresetName,
-            lastSelectedPresetType = lastSelectedPresetType,
-            bookmarks = bookmarks
+            lastSelectedPresetType = lastSelectedPresetType
         )
     }
     
@@ -265,6 +273,14 @@ class UserPreferencesManager(private val context: Context) {
                 preferences[PreferenceKeys.MARGIN_HORIZONTAL] = settings.marginHorizontal
                 preferences[PreferenceKeys.MARGIN_VERTICAL] = settings.marginVertical
                 
+                // Save accessibility settings
+                preferences[PreferenceKeys.USE_SYSTEM_FONT_SIZE] = settings.useSystemFontSize
+                preferences[PreferenceKeys.HIGH_CONTRAST] = settings.highContrast
+                preferences[PreferenceKeys.LETTER_SPACING] = settings.letterSpacing
+                preferences[PreferenceKeys.WORD_SPACING] = settings.wordSpacing
+                preferences[PreferenceKeys.ANIMATIONS_ENABLED] = settings.animationsEnabled
+                preferences[PreferenceKeys.USE_SYSTEM_THEME] = settings.useSystemTheme
+                
                 if (presetName != null) {
                     preferences[PreferenceKeys.CURRENT_PRESET_NAME] = presetName
                 } else {
@@ -340,95 +356,38 @@ class UserPreferencesManager(private val context: Context) {
         return hasInitialLoad
     }
     
-    // Bookmark management functions
-    fun getBookmarks(bookId: String? = null): List<Bookmark> {
-        val bookmarks = (_preferences.value ?: UserPreferences()).bookmarks
-        return if (bookId != null) {
-            bookmarks.filter { it.bookId == bookId }.sortedByDescending { it.timestamp }
-        } else {
-            bookmarks.sortedByDescending { it.timestamp }
+    // Bookmark management functions - now delegated to BookmarkRepository
+    fun getBookmarks(bookId: String? = null): List<com.bsikar.helix.data.model.Bookmark> {
+        return runBlocking {
+            if (bookId != null) {
+                bookmarkRepository.getBookmarksForBook(bookId)
+            } else {
+                bookmarkRepository.getAllBookmarks()
+            }
         }
     }
     
-    fun addBookmark(bookmark: Bookmark) {
-        val currentPrefs = _preferences.value ?: UserPreferences()
-        val updatedBookmarks = currentPrefs.bookmarks.toMutableList()
-        
-        // Remove existing bookmark at same location
-        updatedBookmarks.removeAll { 
-            it.bookId == bookmark.bookId && 
-            it.chapterNumber == bookmark.chapterNumber && 
-            it.pageNumber == bookmark.pageNumber 
-        }
-        
-        // Add new bookmark
-        updatedBookmarks.add(bookmark)
-        
-        // Update state immediately
-        _preferences.value = currentPrefs.copy(bookmarks = updatedBookmarks)
-        
-        // Persist to DataStore
+    fun addBookmark(bookmark: com.bsikar.helix.data.model.Bookmark) {
         scope.launch {
-            try {
-                context.dataStore.edit { preferences ->
-                    val bookmarksJson = Json.encodeToString(updatedBookmarks)
-                    preferences[PreferenceKeys.BOOKMARKS] = bookmarksJson
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+            bookmarkRepository.addBookmark(bookmark)
         }
     }
     
     fun removeBookmark(bookmarkId: String) {
-        val currentPrefs = _preferences.value ?: UserPreferences()
-        val updatedBookmarks = currentPrefs.bookmarks.filter { it.id != bookmarkId }
-        
-        // Update state immediately
-        _preferences.value = currentPrefs.copy(bookmarks = updatedBookmarks)
-        
-        // Persist to DataStore
         scope.launch {
-            try {
-                context.dataStore.edit { preferences ->
-                    val bookmarksJson = Json.encodeToString(updatedBookmarks)
-                    preferences[PreferenceKeys.BOOKMARKS] = bookmarksJson
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+            bookmarkRepository.deleteBookmark(bookmarkId)
         }
     }
     
     fun updateBookmarkNote(bookmarkId: String, note: String) {
-        val currentPrefs = _preferences.value ?: UserPreferences()
-        val updatedBookmarks = currentPrefs.bookmarks.map { bookmark ->
-            if (bookmark.id == bookmarkId) {
-                bookmark.copy(note = note)
-            } else {
-                bookmark
-            }
-        }
-        
-        // Update state immediately
-        _preferences.value = currentPrefs.copy(bookmarks = updatedBookmarks)
-        
-        // Persist to DataStore
         scope.launch {
-            try {
-                context.dataStore.edit { preferences ->
-                    val bookmarksJson = Json.encodeToString(updatedBookmarks)
-                    preferences[PreferenceKeys.BOOKMARKS] = bookmarksJson
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+            bookmarkRepository.updateBookmarkNote(bookmarkId, note)
         }
     }
     
     fun isPageBookmarked(bookId: String, chapterNumber: Int, pageNumber: Int): Boolean {
-        return getBookmarks(bookId).any { 
-            it.chapterNumber == chapterNumber && it.pageNumber == pageNumber 
+        return runBlocking {
+            bookmarkRepository.isPageBookmarked(bookId, chapterNumber, pageNumber)
         }
     }
     

@@ -1,4 +1,4 @@
-package com.bsikar.helix.data
+package com.bsikar.helix.data.model
 
 import java.util.UUID
 import kotlinx.serialization.Serializable

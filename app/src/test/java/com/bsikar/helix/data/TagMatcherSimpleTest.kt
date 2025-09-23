@@ -2,6 +2,10 @@ package com.bsikar.helix.data
 
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.Before
+import com.bsikar.helix.data.model.TagMatcher
+import com.bsikar.helix.data.model.TagCategory
+import com.bsikar.helix.data.model.PresetTags
 import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
 
@@ -10,6 +14,11 @@ import org.junit.runners.Parameterized
  * metadata tag parsing with various realistic scenarios.
  */
 class TagMatcherSimpleTest {
+    
+    @Before
+    fun setup() {
+        PresetTags.initializeForTesting()
+    }
 
     @Test
     fun `test basic tag matching functionality exists`() {
@@ -29,10 +38,10 @@ class TagMatcherSimpleTest {
         val singleResult = TagMatcher.parseMetadataTags(listOf("Action"))
         val multipleResult = TagMatcher.parseMetadataTags(listOf("Action", "Romance", "RandomTag"))
         
-        // Should return lists
-        assertTrue("Empty input should return empty list", emptyResult.isEmpty())
-        assertTrue("Single input should return non-null list", singleResult is List)
-        assertTrue("Multiple inputs should return non-null list", multipleResult is List)
+        // Should return appropriate results
+        assertTrue("Empty input should return untagged", emptyResult.isNotEmpty() && emptyResult.any { it.id == "untagged" })
+        assertTrue("Single input should return non-empty list", singleResult.isNotEmpty())
+        assertTrue("Multiple inputs should return non-empty list", multipleResult.isNotEmpty())
     }
 
     @Test
@@ -65,7 +74,7 @@ class TagMatcherSimpleTest {
         val result = TagMatcher.parseMetadataTags(randomMetadata)
         
         // Should return something meaningful (either empty list or untagged)
-        assertTrue("Random metadata should return a list", result is List)
+        assertNotNull("Random metadata should return a valid result", result)
         
         // If it returns anything, check for untagged
         if (result.isNotEmpty()) {
@@ -86,8 +95,8 @@ class TagMatcherSimpleTest {
         
         val result = TagMatcher.parseMetadataTags(mixedMetadata)
         
-        // Should return a list
-        assertTrue("Mixed metadata should return a list", result is List)
+        // Should return a valid result
+        assertNotNull("Mixed metadata should return a valid result", result)
         
         // Should have some tags
         assertTrue("Mixed metadata should return some results", result.isNotEmpty())
@@ -110,6 +119,11 @@ class FormatTagTest(
     private val metadata: String,
     private val description: String
 ) {
+    
+    @Before
+    fun setup() {
+        PresetTags.initializeForTesting()
+    }
 
     companion object {
         @JvmStatic
@@ -149,6 +163,11 @@ class GenreTagTest(
     private val metadata: String,
     private val description: String
 ) {
+    
+    @Before
+    fun setup() {
+        PresetTags.initializeForTesting()
+    }
 
     companion object {
         @JvmStatic

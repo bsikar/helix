@@ -1,15 +1,14 @@
 package com.bsikar.helix.viewmodels
 
-import android.app.Application
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.bsikar.helix.data.Book
-import com.bsikar.helix.data.BookRepository
+import com.bsikar.helix.data.model.Book
+import com.bsikar.helix.data.repository.BookRepository
 import com.bsikar.helix.data.LibraryManager
-import com.bsikar.helix.data.ReadingStatus
-import com.bsikar.helix.data.Tag
-import com.bsikar.helix.data.PresetTags
-import com.bsikar.helix.data.TagMatcher
+import com.bsikar.helix.data.model.ReadingStatus
+import com.bsikar.helix.data.model.Tag
+import com.bsikar.helix.data.model.PresetTags
+import com.bsikar.helix.data.model.TagMatcher
 import com.bsikar.helix.data.UserPreferencesManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -20,15 +19,53 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.snapshotFlow
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import com.bsikar.helix.data.model.UiState
+import com.bsikar.helix.utils.safeCallWithUiState
+import com.bsikar.helix.utils.toUiState
+import com.bsikar.helix.ui.components.SearchUtils
 
-class LibraryViewModel(application: Application) : AndroidViewModel(application) {
-
-    private val preferencesManager = UserPreferencesManager(application)
-    val libraryManager = LibraryManager(application, preferencesManager)
+@OptIn(FlowPreview::class)
+@HiltViewModel
+class LibraryViewModel @Inject constructor(
+    val libraryManager: LibraryManager
+) : ViewModel() {
     
     // Convert LibraryManager's books state to StateFlow
-    private val _allBooks = MutableStateFlow<List<Book>>(emptyList())
-    val allBooks: StateFlow<List<Book>> = _allBooks.asStateFlow()
+    private val _allBooks = MutableStateFlow<List<com.bsikar.helix.data.model.Book>>(emptyList())
+    val allBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = _allBooks.asStateFlow()
+    
+    // Search and filtering state
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+    
+    // Sorting state
+    private val _readingSortAscending = MutableStateFlow(false)
+    val readingSortAscending: StateFlow<Boolean> = _readingSortAscending.asStateFlow()
+    
+    private val _planToReadSortAscending = MutableStateFlow(true)
+    val planToReadSortAscending: StateFlow<Boolean> = _planToReadSortAscending.asStateFlow()
+    
+    private val _completedSortAscending = MutableStateFlow(true)
+    val completedSortAscending: StateFlow<Boolean> = _completedSortAscending.asStateFlow()
+    
+    // Refresh state
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+    
+    private val _scanMessage = MutableStateFlow("")
+    val scanMessage: StateFlow<String> = _scanMessage.asStateFlow()
+    
+    // Error handling state
+    private val _libraryState = MutableStateFlow<UiState<List<com.bsikar.helix.data.model.Book>>>(UiState.Loading)
+    val libraryState: StateFlow<UiState<List<com.bsikar.helix.data.model.Book>>> = _libraryState.asStateFlow()
+    
+    private val _errorMessage = MutableStateFlow<String?>(null)
+    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
     
     init {
         // Observe LibraryManager's books state and update our StateFlow
@@ -40,7 +77,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // Reading Books (currently reading)
-    val readingBooks: StateFlow<List<Book>> = allBooks.map { books ->
+    val readingBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = allBooks.map { books ->
         books.filter { it.readingStatus == ReadingStatus.READING }
              .sortedByDescending { it.lastReadTimestamp }
     }.stateIn(
@@ -50,7 +87,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     )
 
     // Plan to Read Books
-    val planToReadBooks: StateFlow<List<Book>> = allBooks.map { books ->
+    val planToReadBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = allBooks.map { books ->
         books.filter { it.readingStatus == ReadingStatus.PLAN_TO_READ }
              .sortedBy { it.title }
     }.stateIn(
@@ -60,7 +97,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     )
 
     // Completed Books
-    val completedBooks: StateFlow<List<Book>> = allBooks.map { books ->
+    val completedBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = allBooks.map { books ->
         books.filter { it.readingStatus == ReadingStatus.COMPLETED }
              .sortedBy { it.title }
     }.stateIn(
@@ -70,9 +107,74 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     )
 
     // Recent Books (books that have been read recently)
-    val recentBooks: StateFlow<List<Book>> = allBooks.map { books ->
+    val recentBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = allBooks.map { books ->
         books.filter { it.lastReadTimestamp > 0 }
              .sortedByDescending { it.lastReadTimestamp }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    // Debounced search query for better performance
+    private val debouncedSearchQuery = searchQuery.debounce(300)
+
+    // Filtered and sorted reading books
+    val filteredReadingBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = combine(
+        readingBooks,
+        debouncedSearchQuery,
+        readingSortAscending
+    ) { books, query, sortAscending ->
+        val filtered = if (query.isBlank()) {
+            books
+        } else {
+            searchBooks(books, query)
+        }
+        if (sortAscending) filtered.reversed() else filtered
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    // Filtered and sorted plan to read books
+    val filteredPlanToReadBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = combine(
+        planToReadBooks,
+        debouncedSearchQuery,
+        planToReadSortAscending
+    ) { books, query, sortAscending ->
+        val filtered = if (query.isBlank()) {
+            books
+        } else {
+            searchBooks(books, query)
+        }
+        if (sortAscending) {
+            filtered.sortedBy { it.title }
+        } else {
+            filtered.sortedByDescending { it.title }
+        }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    // Filtered and sorted completed books
+    val filteredCompletedBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = combine(
+        completedBooks,
+        debouncedSearchQuery,
+        completedSortAscending
+    ) { books, query, sortAscending ->
+        val filtered = if (query.isBlank()) {
+            books
+        } else {
+            searchBooks(books, query)
+        }
+        if (sortAscending) {
+            filtered.sortedBy { it.title }
+        } else {
+            filtered.sortedByDescending { it.title }
+        }
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -83,11 +185,13 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
      * Updates the progress of a specific book by its ID
      */
     fun updateBookProgress(bookId: String, newProgress: Float) {
-        val book = libraryManager.getBookById(bookId)
-        if (book != null) {
-            val totalPages = if (book.totalChapters > 0) book.totalChapters * 20 else book.totalPages
-            val currentPage = (newProgress * totalPages).toInt().coerceAtLeast(1)
-            libraryManager.updateBookProgress(bookId, book.currentChapter, currentPage, book.scrollPosition)
+        viewModelScope.launch {
+            val book = libraryManager.getBookById(bookId)
+            if (book != null) {
+                val totalPages = if (book.totalChapters > 0) book.totalChapters * 20 else book.totalPages
+                val currentPage = (newProgress * totalPages).toInt().coerceAtLeast(1)
+                libraryManager.updateBookProgress(bookId, book.currentChapter, currentPage, book.scrollPosition)
+            }
         }
     }
 
@@ -122,7 +226,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     /**
      * Adds a new book to the library
      */
-    fun addBook(book: Book) {
+    fun addBook(book: com.bsikar.helix.data.model.Book) {
         // This would be handled by LibraryManager.importEpubFile
     }
 
@@ -136,7 +240,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     /**
      * Gets a specific book by its ID
      */
-    fun getBookById(bookId: String): Book? {
+    suspend fun getBookById(bookId: String): com.bsikar.helix.data.model.Book? {
         return libraryManager.getBookById(bookId)
     }
 
@@ -144,10 +248,12 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
      * Simulates reading progress update - useful for demo purposes
      */
     fun simulateReadingProgress(bookId: String) {
-        val book = getBookById(bookId)
-        if (book != null) {
-            val newProgress = (book.progress + 0.1f).coerceAtMost(1.0f)
-            updateBookProgress(bookId, newProgress)
+        viewModelScope.launch {
+            val book = getBookById(bookId)
+            if (book != null) {
+                val newProgress = (book.progress + 0.1f).coerceAtMost(1.0f)
+                updateBookProgress(bookId, newProgress)
+            }
         }
     }
 
@@ -173,7 +279,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     /**
      * Updates the settings for a specific book (cover display mode, user color, etc.)
      */
-    fun updateBookSettings(updatedBook: Book) {
+    fun updateBookSettings(updatedBook: com.bsikar.helix.data.model.Book) {
         libraryManager.updateBookSettings(updatedBook)
     }
 
@@ -181,9 +287,11 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
      * Add a tag to a book
      */
     fun addTagToBook(bookId: String, tagId: String) {
-        val book = getBookById(bookId)
-        if (book != null && !book.hasTag(tagId)) {
-            updateBookTags(bookId, book.tags + tagId)
+        viewModelScope.launch {
+            val book = getBookById(bookId)
+            if (book != null && !book.hasTag(tagId)) {
+                updateBookTags(bookId, book.tags + tagId)
+            }
         }
     }
 
@@ -191,16 +299,18 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
      * Remove a tag from a book
      */
     fun removeTagFromBook(bookId: String, tagId: String) {
-        val book = getBookById(bookId)
-        if (book != null) {
-            updateBookTags(bookId, book.tags.filter { it != tagId })
+        viewModelScope.launch {
+            val book = getBookById(bookId)
+            if (book != null) {
+                updateBookTags(bookId, book.tags.filter { it != tagId })
+            }
         }
     }
 
     /**
      * Get all books that have any of the specified tags
      */
-    fun getBooksByTags(tagIds: List<String>): List<Book> {
+    fun getBooksByTags(tagIds: List<String>): List<com.bsikar.helix.data.model.Book> {
         return allBooks.value.filter { book ->
             book.hasAnyTag(tagIds)
         }
@@ -230,5 +340,161 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
      */
     fun refreshBooks() {
         // LibraryManager handles persistence, so no need to reload
+    }
+
+    // Search and filtering methods
+    fun updateSearchQuery(query: String) {
+        _searchQuery.value = query
+    }
+
+    fun toggleReadingSortOrder() {
+        _readingSortAscending.value = !_readingSortAscending.value
+    }
+
+    fun togglePlanToReadSortOrder() {
+        _planToReadSortAscending.value = !_planToReadSortAscending.value
+    }
+
+    fun toggleCompletedSortOrder() {
+        _completedSortAscending.value = !_completedSortAscending.value
+    }
+
+    // Refresh functionality
+    fun refreshLibrary() {
+        if (_isRefreshing.value) return
+        
+        _isRefreshing.value = true
+        _scanMessage.value = "Scanning for new books..."
+        
+        libraryManager.rescanWatchedDirectoriesAsync { success, message, newCount ->
+            _isRefreshing.value = false
+            _scanMessage.value = if (success) {
+                if (newCount > 0) "Found $newCount new books!" else "No new books found"
+            } else {
+                "Scan failed: $message"
+            }
+            
+            // Clear message after 3 seconds
+            viewModelScope.launch {
+                kotlinx.coroutines.delay(3000)
+                _scanMessage.value = ""
+            }
+        }
+    }
+
+    // Enhanced search logic with fuzzy matching
+    private fun searchBooks(books: List<com.bsikar.helix.data.model.Book>, query: String): List<com.bsikar.helix.data.model.Book> {
+        if (query.isBlank()) return books
+        
+        // Use fuzzy search for better matching
+        val searchResults = SearchUtils.fuzzySearch(
+            items = books,
+            query = query,
+            getText = { it.title },
+            getSecondaryText = { it.author },
+            threshold = 0.3 // Lower threshold for more inclusive search
+        )
+        
+        return searchResults.map { it.item }
+    }
+
+    // Error handling methods
+    fun clearError() {
+        _errorMessage.value = null
+    }
+
+    private fun handleError(throwable: Throwable) {
+        _errorMessage.value = throwable.message ?: "An unknown error occurred"
+    }
+
+    // Enhanced methods with error handling
+    fun importEpubSafely(filePath: String) {
+        viewModelScope.launch {
+            _libraryState.value = UiState.Loading
+            val result = libraryManager.importEpubFile(java.io.File(filePath)).toUiState()
+            
+            when (result) {
+                is UiState.Error -> {
+                    _libraryState.value = result
+                    handleError(result.exception)
+                }
+                is UiState.Success -> {
+                    _libraryState.value = UiState.Success(allBooks.value)
+                    // Book was successfully imported, state will be updated via Flow
+                }
+                is UiState.Loading -> {
+                    // Loading state already set above
+                }
+            }
+        }
+    }
+
+    /**
+     * Safely rescan watched directories with proper error handling
+     */
+    fun rescanWatchedDirectoriesSafely() {
+        viewModelScope.launch {
+            _libraryState.value = UiState.Loading
+            _isRefreshing.value = true
+            _scanMessage.value = "Scanning for new books..."
+            
+            val result = libraryManager.rescanWatchedDirectories().toUiState()
+            
+            when (result) {
+                is UiState.Error -> {
+                    _libraryState.value = result
+                    _isRefreshing.value = false
+                    _scanMessage.value = "Scan failed: ${result.exception.message}"
+                    handleError(result.exception)
+                }
+                is UiState.Success -> {
+                    _libraryState.value = UiState.Success(allBooks.value)
+                    _isRefreshing.value = false
+                    val newCount = result.data.size
+                    _scanMessage.value = if (newCount > 0) "Found $newCount new books!" else "No new books found"
+                    
+                    // Clear scan message after 3 seconds
+                    viewModelScope.launch {
+                        kotlinx.coroutines.delay(3000)
+                        _scanMessage.value = ""
+                    }
+                }
+                is UiState.Loading -> {
+                    // Loading state already set above
+                }
+            }
+        }
+    }
+
+    /**
+     * Safely import EPUBs from directory with proper error handling
+     */
+    fun importEpubsFromDirectorySafely(directoryPath: String) {
+        viewModelScope.launch {
+            _libraryState.value = UiState.Loading
+            
+            val result = libraryManager.importEpubsFromDirectory(java.io.File(directoryPath)).toUiState()
+            
+            when (result) {
+                is UiState.Error -> {
+                    _libraryState.value = result
+                    handleError(result.exception)
+                }
+                is UiState.Success -> {
+                    _libraryState.value = UiState.Success(allBooks.value)
+                    val importedCount = result.data.size
+                    _scanMessage.value = "Successfully imported $importedCount books!"
+                    
+                    // Clear message after 3 seconds
+                    viewModelScope.launch {
+                        kotlinx.coroutines.delay(3000)
+                        _scanMessage.value = ""
+                    }
+                }
+                is UiState.Loading -> {
+                    // Loading state already set above
+                }
+            }
+        }
     }
 }
