@@ -10,6 +10,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import com.bsikar.helix.data.model.Book
 import com.bsikar.helix.data.model.Tag
 import com.bsikar.helix.data.model.TagCategory
+import com.bsikar.helix.data.model.PresetTags
 import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.theme.ThemeManager
 import com.bsikar.helix.theme.ThemeMode
@@ -51,16 +54,25 @@ fun BrowseScreen(
     onMoveToPlanToRead: (String) -> Unit = {},
     onSetProgress: (String, Float) -> Unit = { _, _ -> },
     onEditTags: (String, List<String>) -> Unit = { _, _ -> },
-    onUpdateBookSettings: (com.bsikar.helix.data.model.Book) -> Unit = { _ -> }
+    onUpdateBookSettings: (com.bsikar.helix.data.model.Book) -> Unit = { _ -> },
+    onRefresh: () -> Unit = {}
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var selectedTags by remember { mutableStateOf<Set<String>>(emptySet()) }
     var expandedCategory by remember { mutableStateOf<TagCategory?>(null) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    val pullToRefreshState = rememberPullToRefreshState()
     
     // Create mutable internal list to allow book updates
-    // Use a key that includes book properties to detect internal book changes
-    val allBooksKey = allBooks.map { "${it.id}-${it.coverDisplayMode}-${it.userSelectedColor}" }.joinToString(",")
+    // Use stable key based on book count to avoid resetting on metadata changes
+    val allBooksKey = remember(allBooks.size) { allBooks.map { it.id }.sorted().joinToString(",") }
     var internalAllBooks by remember(allBooksKey) { mutableStateOf(allBooks) }
+    
+    // Update internal list when parent list changes, but preserve local modifications
+    LaunchedEffect(allBooks) {
+        // Only update books that aren't being locally modified
+        internalAllBooks = allBooks
+    }
     
     // Function to update a book in the internal list
     val updateBookInList = { updatedBook: com.bsikar.helix.data.model.Book ->
@@ -125,53 +137,45 @@ fun BrowseScreen(
         }
     }
     
-    // Organize books by categories - include books without tags
-    val featuredBooks = remember(internalAllBooks) {
-        // Featured: com.bsikar.helix.data.model.Books with specific tags OR high progress OR recently read
-        internalAllBooks.filter { book -> 
-            book.hasAnyTag(listOf("shounen", "seinen")) || 
-            book.progress > 0.5f ||
-            (book.lastReadTimestamp > System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000)) // Read in last 7 days
-        }.take(6)
+    // Organize books by meaningful categories for personal library
+    val recentlyAdded = remember(internalAllBooks) {
+        // Recently imported books (within last 30 days)
+        internalAllBooks.filter { it.isImported }
+            .sortedByDescending { it.dateAdded }
+            .take(8)
     }
     
-    val popularBooks = remember(internalAllBooks) {
-        // Popular: com.bsikar.helix.data.model.Books with specific tags OR any imported books (to show something)
-        val taggedBooks = internalAllBooks.filter { book -> 
-            book.hasAnyTag(listOf("action", "adventure", "fantasy", "supernatural"))
-        }
-        
-        if (taggedBooks.isNotEmpty()) {
-            taggedBooks.take(12)
-        } else {
-            // If no tagged books, show some imported books
-            internalAllBooks.filter { it.isImported }.take(12)
-        }
+    val currentlyReading = remember(internalAllBooks) {
+        // Books currently being read (progress between 0 and 1, excluding completed)
+        internalAllBooks.filter { it.progress > 0f && it.progress < 1f }
+            .sortedByDescending { it.lastReadTimestamp }
+            .take(6)
     }
     
-    val newReleases = remember(internalAllBooks) {
-        // New Releases: com.bsikar.helix.data.model.Books with specific tags OR recently imported books
-        val taggedBooks = internalAllBooks.filter { book -> 
-            book.hasAnyTag(listOf("ongoing", "romance", "comedy"))
-        }
-        
-        if (taggedBooks.isNotEmpty()) {
-            taggedBooks.take(6)
-        } else {
-            // If no tagged books, show recently imported books
-            internalAllBooks.filter { it.isImported }
-                .sortedByDescending { book ->
-                    // Use last read time or a default recent time for newly imported books
-                    maxOf(book.lastReadTimestamp, System.currentTimeMillis() - (30 * 24 * 60 * 60 * 1000))
-                }.take(6)
-        }
+    val unreadBooks = remember(internalAllBooks) {
+        // Books that haven't been started yet
+        internalAllBooks.filter { it.progress == 0f }
+            .sortedBy { it.title }
+            .take(10)
+    }
+    
+    val byAuthor = remember(internalAllBooks) {
+        // Group by author, showing authors with multiple books
+        internalAllBooks.groupBy { it.author }
+            .filter { (_, books) -> books.size > 1 }
+            .toList()
+            .sortedByDescending { (_, books) -> books.size }
+            .take(5)
     }
 
-    // Get all unique tags that exist in the library, organized by all categories
+    // Get only tags that actually exist in the media library
     val availableTagsByCategory = remember(internalAllBooks) {
-        val allTagsInLibrary = internalAllBooks.flatMap { it.getTagObjects() }.distinctBy { it.id }
+        // Get all tags from books in the library
+        val tagsInLibrary = internalAllBooks.flatMap { it.getTagObjects() }.distinctBy { it.id }
+        
+        // Group by category, only showing categories that have tags
         TagCategory.values().filter { it != TagCategory.CUSTOM }.associateWith { category ->
-            allTagsInLibrary.filter { it.category == category }
+            tagsInLibrary.filter { it.category == category }
         }.filterValues { it.isNotEmpty() }
     }
 
@@ -194,17 +198,32 @@ fun BrowseScreen(
         }
     }
 
-    // Filter books based on search query and selected tags (multiple)
-    val filteredFeatured = remember(searchQuery, selectedTags, featuredBooks) {
-        filterBooksByTags(featuredBooks, searchQuery, selectedTags)
+    // Filter books based on search query and selected tags
+    val filteredRecentlyAdded = remember(searchQuery, selectedTags, recentlyAdded) {
+        filterBooksByTags(recentlyAdded, searchQuery, selectedTags)
     }
     
-    val filteredPopular = remember(searchQuery, selectedTags, popularBooks) {
-        filterBooksByTags(popularBooks, searchQuery, selectedTags)
+    val filteredCurrentlyReading = remember(searchQuery, selectedTags, currentlyReading) {
+        filterBooksByTags(currentlyReading, searchQuery, selectedTags)
     }
     
-    val filteredNewReleases = remember(searchQuery, selectedTags, newReleases) {
-        filterBooksByTags(newReleases, searchQuery, selectedTags)
+    val filteredUnreadBooks = remember(searchQuery, selectedTags, unreadBooks) {
+        filterBooksByTags(unreadBooks, searchQuery, selectedTags)
+    }
+    
+    // Filter authors who have books matching the current filters
+    val filteredByAuthor = remember(searchQuery, selectedTags, byAuthor) {
+        byAuthor.mapNotNull { (author, books) ->
+            val filteredBooks = filterBooksByTags(books, searchQuery, selectedTags)
+            if (filteredBooks.isNotEmpty()) {
+                author to filteredBooks
+            } else null
+        }
+    }
+    
+    // All books (for when no specific sections apply or for general browsing)
+    val allFilteredBooks = remember(searchQuery, selectedTags, internalAllBooks) {
+        filterBooksByTags(internalAllBooks, searchQuery, selectedTags)
     }
 
     Scaffold(
@@ -302,11 +321,21 @@ fun BrowseScreen(
             }
         }
     ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = {
+                isRefreshing = true
+                onRefresh()
+                isRefreshing = false
+            },
+            state = pullToRefreshState,
+            modifier = Modifier.fillMaxSize()
         ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = innerPadding,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
             // Search Bar
             item {
                 SearchBar(
@@ -340,66 +369,141 @@ fun BrowseScreen(
                 }
             }
 
-            // Featured Section
-            if (filteredFeatured.isNotEmpty()) {
+            // Currently Reading Section
+            if (filteredCurrentlyReading.isNotEmpty()) {
                 item {
                     BrowseSectionHeader(
-                        title = "Featured", 
+                        title = "Continue Reading", 
                         theme = theme,
-                        onSeeAllClick = { onSeeAllClick("Featured", filteredFeatured) }
+                        onSeeAllClick = { onSeeAllClick("Continue Reading", filteredCurrentlyReading) }
                     )
                 }
                 item {
                     ResponsiveBrowseSection(
-                        books = filteredFeatured
+                        books = filteredCurrentlyReading
                     )
                 }
             }
 
-            // Popular Section
-            if (filteredPopular.isNotEmpty()) {
+            // Recently Added Section
+            if (filteredRecentlyAdded.isNotEmpty()) {
                 item {
                     BrowseSectionHeader(
-                        title = "Popular", 
+                        title = "Recently Added", 
                         theme = theme,
-                        onSeeAllClick = { onSeeAllClick("Popular", filteredPopular) }
+                        onSeeAllClick = { onSeeAllClick("Recently Added", filteredRecentlyAdded) }
                     )
                 }
                 item {
                     ResponsiveBrowseSection(
-                        books = filteredPopular
+                        books = filteredRecentlyAdded
                     )
                 }
             }
 
-            // New Releases Section
-            if (filteredNewReleases.isNotEmpty()) {
+            // Unread Books Section
+            if (filteredUnreadBooks.isNotEmpty()) {
                 item {
                     BrowseSectionHeader(
-                        title = "New Releases", 
+                        title = "Unread Books", 
                         theme = theme,
-                        onSeeAllClick = { onSeeAllClick("New Releases", filteredNewReleases) }
+                        onSeeAllClick = { onSeeAllClick("Unread Books", filteredUnreadBooks) }
                     )
                 }
                 item {
                     ResponsiveBrowseSection(
-                        books = filteredNewReleases
+                        books = filteredUnreadBooks
                     )
+                }
+            }
+
+            // By Author Sections
+            if (filteredByAuthor.isNotEmpty()) {
+                items(filteredByAuthor.take(3)) { (author, books) ->
+                    BrowseSectionHeader(
+                        title = "More by $author", 
+                        theme = theme,
+                        onSeeAllClick = { onSeeAllClick("Books by $author", books) }
+                    )
+                    ResponsiveBrowseSection(
+                        books = books.take(6)
+                    )
+                }
+            }
+
+            // All Books Section (fallback when specific sections are empty or for comprehensive browsing)
+            if (searchQuery.isNotEmpty() || selectedTags.isNotEmpty()) {
+                if (allFilteredBooks.isNotEmpty()) {
+                    item {
+                        BrowseSectionHeader(
+                            title = "Search Results (${allFilteredBooks.size})", 
+                            theme = theme,
+                            onSeeAllClick = { onSeeAllClick("All Results", allFilteredBooks) }
+                        )
+                    }
+                    item {
+                        ResponsiveBrowseSection(
+                            books = allFilteredBooks.take(12)
+                        )
+                    }
+                }
+            } else if (filteredCurrentlyReading.isEmpty() && filteredRecentlyAdded.isEmpty() && 
+                       filteredUnreadBooks.isEmpty() && filteredByAuthor.isEmpty()) {
+                // Show all books when no specific sections have content
+                if (allFilteredBooks.isNotEmpty()) {
+                    item {
+                        BrowseSectionHeader(
+                            title = "All Books (${allFilteredBooks.size})", 
+                            theme = theme,
+                            onSeeAllClick = { onSeeAllClick("All Books", allFilteredBooks) }
+                        )
+                    }
+                    item {
+                        ResponsiveBrowseSection(
+                            books = allFilteredBooks.take(12)
+                        )
+                    }
                 }
             }
 
             // No results message
-            if (filteredFeatured.isEmpty() && filteredPopular.isEmpty() && filteredNewReleases.isEmpty()) {
+            if (allFilteredBooks.isEmpty()) {
                 item {
-                    Text(
-                        text = "No books found.",
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 48.dp),
-                        textAlign = TextAlign.Center,
-                        color = theme.secondaryTextColor
-                    )
+                            .padding(48.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.Search,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = theme.secondaryTextColor.copy(alpha = 0.6f)
+                        )
+                        Text(
+                            text = if (searchQuery.isNotEmpty() || selectedTags.isNotEmpty()) {
+                                "No books match your search criteria"
+                            } else {
+                                "No books in your library yet"
+                            },
+                            textAlign = TextAlign.Center,
+                            color = theme.primaryTextColor,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        if (searchQuery.isEmpty() && selectedTags.isEmpty()) {
+                            Text(
+                                text = "Import some EPUB files to get started!",
+                                textAlign = TextAlign.Center,
+                                color = theme.secondaryTextColor,
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
                 }
+            }
             }
         }
     }

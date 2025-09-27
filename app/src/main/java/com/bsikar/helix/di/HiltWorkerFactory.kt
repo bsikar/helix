@@ -18,7 +18,8 @@ import javax.inject.Singleton
 class HiltWorkerFactory @Inject constructor(
     private val bookRepository: BookRepository,
     private val chapterRepository: ChapterRepository,
-    private val epubParser: EpubParser
+    private val epubParser: EpubParser,
+    private val importedFileDao: com.bsikar.helix.data.source.dao.ImportedFileDao
 ) : WorkerFactory() {
 
     override fun createWorker(
@@ -33,7 +34,8 @@ class HiltWorkerFactory @Inject constructor(
                     workerParams = workerParameters,
                     bookRepository = bookRepository,
                     chapterRepository = chapterRepository,
-                    epubParser = epubParser
+                    epubParser = epubParser,
+                    importedFileDao = importedFileDao
                 )
             }
             else -> null

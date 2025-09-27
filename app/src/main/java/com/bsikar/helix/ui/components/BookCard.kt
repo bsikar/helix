@@ -72,12 +72,14 @@ fun BookCard(
             }
             // Status indicator in top-right corner
             val statusColor = when (book.readingStatus) {
+                ReadingStatus.UNREAD -> Color.Transparent // No indicator for unread books
                 ReadingStatus.PLAN_TO_READ -> theme.secondaryTextColor.copy(alpha = 0.7f)
                 ReadingStatus.READING -> theme.accentColor
                 ReadingStatus.COMPLETED -> Color(0xFF4CAF50)
             }
             
             val statusIcon = when (book.readingStatus) {
+                ReadingStatus.UNREAD -> Icons.Filled.Circle // Placeholder, won't be shown due to transparent color
                 ReadingStatus.PLAN_TO_READ -> Icons.Filled.Schedule
                 ReadingStatus.READING -> Icons.Filled.PlayArrow
                 ReadingStatus.COMPLETED -> Icons.Filled.CheckCircle
@@ -162,6 +164,65 @@ fun BookCard(
                 modifier = Modifier.background(theme.surfaceColor)
             ) {
                 when (book.readingStatus) {
+                    ReadingStatus.UNREAD -> {
+                        DropdownMenuItem(
+                            text = { 
+                                Text(
+                                    "Add to Plan to Read",
+                                    color = theme.primaryTextColor
+                                )
+                            },
+                            onClick = {
+                                onMoveToPlanToRead(book.id)
+                                showContextMenu = false
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.Schedule,
+                                    contentDescription = null,
+                                    tint = theme.secondaryTextColor
+                                )
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { 
+                                Text(
+                                    "Start Reading",
+                                    color = theme.primaryTextColor
+                                )
+                            },
+                            onClick = {
+                                onStartReading(book.id)
+                                showContextMenu = false
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.PlayArrow,
+                                    contentDescription = null,
+                                    tint = theme.accentColor
+                                )
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { 
+                                Text(
+                                    "Mark as Read",
+                                    color = theme.primaryTextColor
+                                )
+                            },
+                            onClick = {
+                                onMarkCompleted(book.id)
+                                showContextMenu = false
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.CheckCircle,
+                                    contentDescription = null,
+                                    tint = Color(0xFF4CAF50)
+                                )
+                            }
+                        )
+                    }
                     ReadingStatus.PLAN_TO_READ -> {
                         DropdownMenuItem(
                             text = { 
@@ -179,6 +240,25 @@ fun BookCard(
                                     Icons.Filled.PlayArrow,
                                     contentDescription = null,
                                     tint = theme.accentColor
+                                )
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { 
+                                Text(
+                                    "Mark as Read",
+                                    color = theme.primaryTextColor
+                                )
+                            },
+                            onClick = {
+                                onMarkCompleted(book.id)
+                                showContextMenu = false
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.CheckCircle,
+                                    contentDescription = null,
+                                    tint = Color(0xFF4CAF50)
                                 )
                             }
                         )
@@ -330,7 +410,9 @@ fun BookCard(
             onDismiss = { showBookSettings = false },
             onSaveSettings = { metadataUpdate ->
                 val colorValue = metadataUpdate.userSelectedColor?.value?.toLong()
+                println("BookCard.onSaveSettings: Before copy - book progress: ${book.progress}, explicitStatus: ${book.explicitReadingStatus}")
                 val updatedBook = book.copy(
+                    // Update only the metadata fields from the dialog
                     title = metadataUpdate.title,
                     author = metadataUpdate.author,
                     description = metadataUpdate.description,
@@ -341,7 +423,11 @@ fun BookCard(
                     coverDisplayMode = metadataUpdate.coverDisplayMode,
                     userSelectedColor = colorValue,
                     userEditedMetadata = true
+                    // NOTE: All other fields (progress, explicitReadingStatus, currentPage, etc.) 
+                    // are automatically preserved by copy()
                 )
+                println("BookCard.onSaveSettings: After copy - updatedBook progress: ${updatedBook.progress}, explicitStatus: ${updatedBook.explicitReadingStatus}")
+                showBookSettings = false
                 onUpdateBookSettings(updatedBook)
             }
         )

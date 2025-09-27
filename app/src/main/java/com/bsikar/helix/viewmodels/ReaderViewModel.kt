@@ -24,6 +24,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import android.content.Context
+import android.util.Log
+import java.io.File
+import java.util.zip.ZipFile
 
 /**
  * ViewModel for managing reader content, caching, and performance optimizations
@@ -34,7 +37,8 @@ class ReaderViewModel @Inject constructor(
     private val preferencesManager: UserPreferencesManager,
     private val readingProgressRepository: ReadingProgressRepository,
     private val chapterRepository: ChapterRepository,
-    private val analyticsRepository: ReadingAnalyticsRepository
+    private val analyticsRepository: ReadingAnalyticsRepository,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: Context
 ) : ViewModel() {
 
     // Cache for parsed content to prevent re-parsing on recomposition
@@ -94,6 +98,8 @@ class ReaderViewModel @Inject constructor(
     
     private val _readingSessionStartTime = MutableStateFlow<Long?>(null)
     private val _lastScrollPosition = MutableStateFlow(0)
+    private val _lastScrollItemIndex = MutableStateFlow(0)
+    private val _lastScrollItemOffset = MutableStateFlow(0)
     private val _currentPageNumber = MutableStateFlow(1)
     
     /**
@@ -133,7 +139,7 @@ class ReaderViewModel @Inject constructor(
                     _parsedEpub.value = cachedEpub
                     // Load chapters from database
                     launch { loadChaptersForBook(book.id) }
-                    loadChapterContent(cachedEpub, _currentChapterIndex.value)
+                    loadChapterContent(cachedEpub, _currentChapterIndex.value, appContext)
                 } else {
                     // Load from LibraryManager
                     val result = libraryManager.getEpubContent(book)
@@ -147,7 +153,7 @@ class ReaderViewModel @Inject constructor(
                             // Store chapters in database if not already stored
                             launch { storeChaptersForBook(book.id, epub) }
                             
-                            loadChapterContent(epub, _currentChapterIndex.value)
+                            loadChapterContent(epub, _currentChapterIndex.value, appContext)
                         } else {
                             _loadingError.value = "EPUB content is null"
                         }
@@ -192,10 +198,22 @@ class ReaderViewModel @Inject constructor(
                         // Load content on demand
                         loadChapterContentOnDemand(context, book, epub, chapter)
                     } else {
-                        // No context available, show error
-                        listOf(ContentElement.TextElement(
-                            androidx.compose.ui.text.AnnotatedString("Context required to load chapter content")
-                        ))
+                        // No context available, try to load directly from file if possible
+                        if (epub.filePath != null && File(epub.filePath!!).exists()) {
+                            try {
+                                // Try to load content without context using pure file operations
+                                loadChapterContentDirectly(epub.filePath!!, chapter, epub.images)
+                            } catch (e: Exception) {
+                                Log.w("ReaderViewModel", "Failed to load chapter content directly: ${e.message}")
+                                listOf(ContentElement.TextElement(
+                                    androidx.compose.ui.text.AnnotatedString("Unable to load chapter content. Please restart the reader.")
+                                ))
+                            }
+                        } else {
+                            listOf(ContentElement.TextElement(
+                                androidx.compose.ui.text.AnnotatedString("Unable to load chapter content. Please restart the reader.")
+                            ))
+                        }
                     }
                     
                     // Cache the parsed content
@@ -265,6 +283,42 @@ class ReaderViewModel @Inject constructor(
     }
     
     /**
+     * Load chapter content directly from file without Context
+     */
+    private suspend fun loadChapterContentDirectly(
+        epubFilePath: String,
+        chapter: EpubChapter,
+        images: Map<String, String>
+    ): List<ContentElement> {
+        return try {
+            // Read EPUB file as ZIP
+            val file = File(epubFilePath)
+            val zipFile = java.util.zip.ZipFile(file)
+            
+            // Find the chapter entry in the ZIP
+            val chapterEntry = zipFile.getEntry(chapter.href)
+            if (chapterEntry != null) {
+                val inputStream = zipFile.getInputStream(chapterEntry)
+                val chapterContent = inputStream.bufferedReader().use { it.readText() }
+                zipFile.close()
+                
+                // Parse the content
+                parseContentWithSettings(chapterContent, images)
+            } else {
+                zipFile.close()
+                listOf(ContentElement.TextElement(
+                    androidx.compose.ui.text.AnnotatedString("Chapter file not found in EPUB")
+                ))
+            }
+        } catch (e: Exception) {
+            Log.e("ReaderViewModel", "Error loading chapter content directly: ${e.message}")
+            listOf(ContentElement.TextElement(
+                androidx.compose.ui.text.AnnotatedString("Error loading chapter: ${e.message}")
+            ))
+        }
+    }
+    
+    /**
      * Parse HTML content with current reader settings
      */
     private fun parseContentWithSettings(htmlContent: String, images: Map<String, String>): List<ContentElement> {
@@ -278,6 +332,10 @@ class ReaderViewModel @Inject constructor(
     fun navigateToChapter(chapterIndex: Int, context: Context? = null) {
         val epub = _parsedEpub.value ?: return
         if (chapterIndex != _currentChapterIndex.value) {
+            // Reset scroll position when navigating to different chapter
+            _lastScrollPosition.value = 0
+            _lastScrollItemIndex.value = 0
+            _lastScrollItemOffset.value = 0
             loadChapterContent(epub, chapterIndex, context)
         }
     }
@@ -288,6 +346,8 @@ class ReaderViewModel @Inject constructor(
     fun previousChapter(context: Context? = null) {
         val currentIndex = _currentChapterIndex.value
         if (currentIndex > 0) {
+            // Save current progress before navigating
+            saveCurrentReadingProgress()
             navigateToChapter(currentIndex - 1, context)
         }
     }
@@ -299,6 +359,8 @@ class ReaderViewModel @Inject constructor(
         val epub = _parsedEpub.value ?: return
         val currentIndex = _currentChapterIndex.value
         if (currentIndex < epub.chapters.size - 1) {
+            // Save current progress before navigating
+            saveCurrentReadingProgress()
             navigateToChapter(currentIndex + 1, context)
         }
     }
@@ -348,6 +410,19 @@ class ReaderViewModel @Inject constructor(
     }
     
     /**
+     * Navigate to a bookmarked position
+     */
+    fun navigateToBookmark(bookmark: com.bsikar.helix.data.model.Bookmark, context: Context? = null) {
+        // Convert chapter number (1-based) to chapter index (0-based)
+        val targetChapterIndex = (bookmark.chapterNumber - 1).coerceAtLeast(0)
+        navigateToChapter(targetChapterIndex, context)
+        
+        // Update the page number and scroll position from bookmark
+        _currentPageNumber.value = bookmark.pageNumber
+        _lastScrollPosition.value = bookmark.scrollPosition
+    }
+    
+    /**
      * Get cache statistics for debugging
      */
     fun getCacheStats(): String {
@@ -357,22 +432,37 @@ class ReaderViewModel @Inject constructor(
     /**
      * Load reading progress for the current book
      */
-    private fun loadReadingProgress(bookId: String) {
-        viewModelScope.launch {
-            try {
-                val latestProgress = readingProgressRepository.getLatestProgressForBook(bookId)
-                _currentReadingProgress.value = latestProgress
-                
-                // Restore position if progress exists
-                latestProgress?.let { progress ->
-                    _currentChapterIndex.value = progress.chapterIndex
-                    _lastScrollPosition.value = progress.scrollPosition
-                    _currentPageNumber.value = progress.pageNumber
-                }
-            } catch (e: Exception) {
-                // Log error but don't block reading
-                android.util.Log.e("ReaderViewModel", "Failed to load reading progress: ${e.message}")
+    private suspend fun loadReadingProgress(bookId: String) {
+        try {
+            val latestProgress = readingProgressRepository.getLatestProgressForBook(bookId)
+            _currentReadingProgress.value = latestProgress
+            
+            // Restore position if progress exists
+            latestProgress?.let { progress ->
+                _currentChapterIndex.value = progress.chapterIndex
+                _lastScrollPosition.value = progress.scrollPosition
+                _lastScrollItemIndex.value = progress.scrollItemIndex
+                _lastScrollItemOffset.value = progress.scrollItemOffset
+                _currentPageNumber.value = progress.pageNumber
+                android.util.Log.d("ReaderViewModel", "Restored reading progress for book $bookId: chapter ${progress.chapterIndex}, item ${progress.scrollItemIndex}, offset ${progress.scrollItemOffset}")
+            } ?: run {
+                // No progress found, start from beginning
+                _currentChapterIndex.value = 0
+                _lastScrollPosition.value = 0
+                _lastScrollItemIndex.value = 0
+                _lastScrollItemOffset.value = 0
+                _currentPageNumber.value = 1
+                android.util.Log.d("ReaderViewModel", "No reading progress found for book $bookId, starting from beginning")
             }
+        } catch (e: Exception) {
+            // Log error but don't block reading
+            android.util.Log.e("ReaderViewModel", "Failed to load reading progress: ${e.message}")
+            // Reset to beginning on error
+            _currentChapterIndex.value = 0
+            _lastScrollPosition.value = 0
+            _lastScrollItemIndex.value = 0
+            _lastScrollItemOffset.value = 0
+            _currentPageNumber.value = 1
         }
     }
     
@@ -408,13 +498,15 @@ class ReaderViewModel @Inject constructor(
      * End the current reading session and save progress
      */
     fun endReadingSession() {
-        _readingSessionStartTime.value = null
+        // Save current reading progress before ending session
         saveCurrentReadingProgress()
+        _readingSessionStartTime.value = null
         
         // End analytics tracking
         viewModelScope.launch {
             val chapterIndex = _currentChapterIndex.value
             val sessionId = currentSessionId
+            val scrollPosition = _lastScrollPosition.value
             
             if (sessionId != null) {
                 try {
@@ -422,7 +514,7 @@ class ReaderViewModel @Inject constructor(
                         sessionId = sessionId,
                         endChapter = chapterIndex,
                         endPage = 0, // Using 0 as default since we don't have page tracking
-                        endScrollPosition = 0,
+                        endScrollPosition = scrollPosition,
                         wordsRead = wordsReadInSession,
                         charactersRead = wordsReadInSession * 5 // Rough estimation
                     )
@@ -440,8 +532,41 @@ class ReaderViewModel @Inject constructor(
      */
     fun updateScrollPosition(scrollPosition: Int) {
         _lastScrollPosition.value = scrollPosition
-        // Auto-save progress periodically
+        // Auto-save progress immediately for better persistence
         saveCurrentReadingProgress()
+    }
+    
+    /**
+     * Update scroll position with item index and offset for precise tracking
+     */
+    fun updateScrollPosition(itemIndex: Int, itemOffset: Int) {
+        _lastScrollItemIndex.value = itemIndex
+        _lastScrollItemOffset.value = itemOffset
+        // Also keep the old method for compatibility
+        _lastScrollPosition.value = itemIndex * 1000 + itemOffset
+        // Auto-save progress immediately for better persistence
+        saveCurrentReadingProgress()
+    }
+    
+    /**
+     * Get current scroll position
+     */
+    fun getCurrentScrollPosition(): Int {
+        return _lastScrollPosition.value
+    }
+    
+    /**
+     * Get current scroll item index
+     */
+    fun getCurrentScrollItemIndex(): Int {
+        return _lastScrollItemIndex.value
+    }
+    
+    /**
+     * Get current scroll item offset
+     */
+    fun getCurrentScrollItemOffset(): Int {
+        return _lastScrollItemOffset.value
     }
     
     /**
@@ -457,9 +582,7 @@ class ReaderViewModel @Inject constructor(
      */
     private fun saveCurrentReadingProgress() {
         val book = _currentBook.value ?: return
-        val epub = _parsedEpub.value ?: return
         val chapterIndex = _currentChapterIndex.value
-        val chapter = epub.chapters.getOrNull(chapterIndex) ?: return
         
         viewModelScope.launch {
             try {
@@ -468,11 +591,24 @@ class ReaderViewModel @Inject constructor(
                     (System.currentTimeMillis() - sessionStartTime) / 1000
                 } else 0L
                 
+                // Get chapter title from current chapter state or database
+                val chapterTitle = _currentChapter.value?.title ?: run {
+                    // Fallback: try to get from database chapters
+                    val chapters = _chapters.value
+                    if (chapterIndex < chapters.size) {
+                        chapters[chapterIndex].title
+                    } else {
+                        "Chapter ${chapterIndex + 1}"
+                    }
+                }
+                
                 val progress = ReadingProgress(
                     bookId = book.id,
                     chapterIndex = chapterIndex,
-                    chapterTitle = chapter.title,
+                    chapterTitle = chapterTitle,
                     scrollPosition = _lastScrollPosition.value,
+                    scrollItemIndex = _lastScrollItemIndex.value,
+                    scrollItemOffset = _lastScrollItemOffset.value,
                     pageNumber = _currentPageNumber.value,
                     totalPagesInChapter = 1, // This could be calculated based on content length
                     readingTimeSeconds = readingTime,
@@ -480,12 +616,14 @@ class ReaderViewModel @Inject constructor(
                     isChapterCompleted = false // Could be determined by scroll position
                 )
                 
+                android.util.Log.d("ReaderViewModel", "Saving reading progress: book=${book.id}, chapter=$chapterIndex, scroll=${_lastScrollPosition.value}")
+                
                 // Use upsert to maintain one progress entry per chapter
                 readingProgressRepository.upsertProgressForChapter(progress)
                 _currentReadingProgress.value = progress
                 
             } catch (e: Exception) {
-                android.util.Log.e("ReaderViewModel", "Failed to save reading progress: ${e.message}")
+                android.util.Log.e("ReaderViewModel", "Failed to save reading progress: ${e.message}", e)
             }
         }
     }
@@ -555,19 +693,21 @@ class ReaderViewModel @Inject constructor(
         
         _currentBook.value = book
         
-        // Load reading progress first, then set chapter index
-        loadReadingProgress(book.id)
-        
-        if (book.isImported) {
-            loadEpubContent(book)
-        } else {
-            // For non-imported books, clear EPUB data
-            _parsedEpub.value = null
-            _currentContent.value = emptyList()
+        viewModelScope.launch {
+            // Load reading progress first, then set chapter index
+            loadReadingProgress(book.id)
+            
+            if (book.isImported) {
+                loadEpubContent(book)
+            } else {
+                // For non-imported books, clear EPUB data
+                _parsedEpub.value = null
+                _currentContent.value = emptyList()
+            }
+            
+            // Start reading session
+            startReadingSession()
         }
-        
-        // Start reading session
-        startReadingSession()
     }
     
     /**
@@ -628,7 +768,7 @@ class ReaderViewModel @Inject constructor(
             _currentChapter.value = chapter
             
             // Load content for this chapter
-            loadChapterContent(currentEpub, chapterIndex)
+            loadChapterContent(currentEpub, chapterIndex, appContext)
             
             // Update reading progress
             saveCurrentReadingProgress()

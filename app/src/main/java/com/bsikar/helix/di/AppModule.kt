@@ -163,9 +163,10 @@ object AppModule {
     fun provideImportManager(
         @ApplicationContext context: Context,
         workManager: WorkManager,
-        importTaskDao: ImportTaskDao
+        importTaskDao: ImportTaskDao,
+        importedFileDao: ImportedFileDao
     ): ImportManager {
-        return ImportManager(context, workManager, importTaskDao)
+        return ImportManager(context, workManager, importTaskDao, importedFileDao)
     }
 
     @Provides

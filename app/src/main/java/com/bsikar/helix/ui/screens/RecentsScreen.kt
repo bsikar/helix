@@ -17,6 +17,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
+import java.io.File
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -317,8 +320,20 @@ fun RecentBookItem(
                     .width(60.dp)
                     .aspectRatio(0.68f)
                     .clip(RoundedCornerShape(6.dp))
-                    .background(book.coverColorComposeColor)
-            )
+                    .background(book.getEffectiveCoverColor())
+            ) {
+                // Display cover art if available and display mode allows it
+                if (book.shouldShowCoverArt() && !book.coverImagePath.isNullOrBlank()) {
+                    AsyncImage(
+                        model = File(book.coverImagePath),
+                        contentDescription = "Book cover",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                        fallback = null, // Fall back to background color when image fails
+                        error = null // Show background color on error
+                    )
+                }
+            }
             
             // Book info
             Column(
@@ -368,7 +383,7 @@ fun RecentBookItem(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "${(book.progress * 100).toInt()}%",
+                            text = "${kotlin.math.round(book.progress * 100).toInt()}%",
                             fontSize = 12.sp,
                             color = theme.accentColor,
                             fontWeight = FontWeight.Medium
@@ -403,6 +418,65 @@ fun RecentBookItem(
             modifier = Modifier.background(theme.surfaceColor)
         ) {
             when (book.readingStatus) {
+                ReadingStatus.UNREAD -> {
+                    DropdownMenuItem(
+                        text = { 
+                            Text(
+                                "Add to Plan to Read",
+                                color = theme.primaryTextColor
+                            )
+                        },
+                        onClick = {
+                            onMoveToPlanToRead(book.id)
+                            showContextMenu = false
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.Schedule,
+                                contentDescription = null,
+                                tint = theme.secondaryTextColor
+                            )
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { 
+                            Text(
+                                "Start Reading",
+                                color = theme.primaryTextColor
+                            )
+                        },
+                        onClick = {
+                            onStartReading(book.id)
+                            showContextMenu = false
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.PlayArrow,
+                                contentDescription = null,
+                                tint = theme.accentColor
+                            )
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { 
+                            Text(
+                                "Mark as Read",
+                                color = theme.primaryTextColor
+                            )
+                        },
+                        onClick = {
+                            onMarkCompleted(book.id)
+                            showContextMenu = false
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.CheckCircle,
+                                contentDescription = null,
+                                tint = Color(0xFF4CAF50)
+                            )
+                        }
+                    )
+                }
                 ReadingStatus.PLAN_TO_READ -> {
                     DropdownMenuItem(
                         text = { 
@@ -420,6 +494,25 @@ fun RecentBookItem(
                                 Icons.Filled.PlayArrow,
                                 contentDescription = null,
                                 tint = theme.accentColor
+                            )
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { 
+                            Text(
+                                "Mark as Read",
+                                color = theme.primaryTextColor
+                            )
+                        },
+                        onClick = {
+                            onMarkCompleted(book.id)
+                            showContextMenu = false
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.CheckCircle,
+                                contentDescription = null,
+                                tint = Color(0xFF4CAF50)
                             )
                         }
                     )

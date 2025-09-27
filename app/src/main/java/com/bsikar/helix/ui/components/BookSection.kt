@@ -143,6 +143,14 @@ fun InfiniteHorizontalBookScroll(
 ) {
     if (books.isEmpty()) return
     
+    // Stabilize book list to prevent rapid key changes that cause deactivated node issues
+    val stableBooks by remember(books.map { it.id }.joinToString(",")) {
+        mutableStateOf(books)
+    }
+    
+    // Use stable book list for calculations
+    val booksToUse = if (stableBooks.map { it.id } == books.map { it.id }) books else stableBooks
+    
     // Calculate visible items to determine if infinite scrolling is needed
     val configuration = LocalConfiguration.current
     val bookCardWidth = 120.dp
@@ -152,16 +160,16 @@ fun InfiniteHorizontalBookScroll(
     val availableWidth = configuration.screenWidthDp.dp - horizontalPadding
     val booksVisibleOnScreen = maxOf(1, (availableWidth / (bookCardWidth + bookSpacing)).toInt())
     
-    // If we can fit all books on screen, use simple LazyRow
-    if (books.size <= booksVisibleOnScreen) {
+    // If we can fit all books on screen or have very few books, use simple LazyRow
+    if (booksToUse.size <= booksVisibleOnScreen || booksToUse.size <= 3) {
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = contentPadding,
             modifier = modifier
         ) {
             items(
-                items = books,
-                key = { book -> book.id }
+                items = booksToUse,
+                key = { book -> "simple_${book.id}" }
             ) { book ->
                 BookCard(
                     book = book,
@@ -181,9 +189,10 @@ fun InfiniteHorizontalBookScroll(
         return
     }
     
-    // For infinite scrolling: use large item count with modulo operations
-    val virtualItemCount = Int.MAX_VALUE
-    val startIndex = virtualItemCount / 2 - (virtualItemCount / 2) % books.size
+    // For infinite scrolling: use more conservative approach
+    val maxItems = 1000 // Reduced from Int.MAX_VALUE to prevent memory issues
+    val repeatCount = maxItems / booksToUse.size
+    val startIndex = (repeatCount / 2) * booksToUse.size
     
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = startIndex)
     
@@ -194,23 +203,30 @@ fun InfiniteHorizontalBookScroll(
         modifier = modifier
     ) {
         items(
-            count = virtualItemCount,
-            key = { index -> "${books[index % books.size].id}_${index / books.size}" }
+            count = maxItems,
+            key = { index -> 
+                val bookIndex = index % booksToUse.size
+                val cycle = index / booksToUse.size
+                "infinite_${booksToUse[bookIndex].id}_cycle_$cycle"
+            }
         ) { index ->
-            val book = books[index % books.size]
-            BookCard(
-                book = book,
-                showProgress = showProgress,
-                theme = theme,
-                searchQuery = searchQuery,
-                onBookClick = onBookClick,
-                onStartReading = onStartReading,
-                onMarkCompleted = onMarkCompleted,
-                onMoveToPlanToRead = onMoveToPlanToRead,
-                onSetProgress = onSetProgress,
-                onEditTags = onEditTags,
-                onUpdateBookSettings = onUpdateBookSettings
-            )
+            val bookIndex = index % booksToUse.size
+            if (bookIndex < booksToUse.size) {
+                val book = booksToUse[bookIndex]
+                BookCard(
+                    book = book,
+                    showProgress = showProgress,
+                    theme = theme,
+                    searchQuery = searchQuery,
+                    onBookClick = onBookClick,
+                    onStartReading = onStartReading,
+                    onMarkCompleted = onMarkCompleted,
+                    onMoveToPlanToRead = onMoveToPlanToRead,
+                    onSetProgress = onSetProgress,
+                    onEditTags = onEditTags,
+                    onUpdateBookSettings = onUpdateBookSettings
+                )
+            }
         }
     }
 }

@@ -3,6 +3,8 @@ package com.bsikar.helix.data.source
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import android.content.Context
 import com.bsikar.helix.data.source.dao.BookDao
 import com.bsikar.helix.data.source.dao.BookmarkDao
@@ -38,7 +40,7 @@ import com.bsikar.helix.data.model.ReadingSession
         ImportTask::class,
         ReadingSession::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class HelixDatabase : RoomDatabase() {
@@ -57,12 +59,20 @@ abstract class HelixDatabase : RoomDatabase() {
     companion object {
         private const val DATABASE_NAME = "helix_database"
         
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // Add explicitReadingStatus column to books table
+                database.execSQL("ALTER TABLE books ADD COLUMN explicitReadingStatus TEXT")
+            }
+        }
+        
         fun build(context: Context): HelixDatabase {
             return Room.databaseBuilder(
                 context,
                 HelixDatabase::class.java,
                 DATABASE_NAME
-            ).build()
+            ).addMigrations(MIGRATION_8_9)
+             .build()
         }
     }
 }

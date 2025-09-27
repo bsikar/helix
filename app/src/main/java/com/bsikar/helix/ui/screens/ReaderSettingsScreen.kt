@@ -43,17 +43,13 @@ fun ReaderSettingsScreen(
     var showOverrideDialog by remember { mutableStateOf(false) }
     var presetToOverride by remember { mutableIntStateOf(-1) }
     
-    // Local state for immediate UI feedback
-    var currentActivePreset by remember { mutableStateOf(preferencesManager.getCurrentPresetInfo()) }
-    
-    // Update local state when preferencesManager state changes
-    LaunchedEffect(preferencesManager.getCurrentPresetInfo()) {
-        currentActivePreset = preferencesManager.getCurrentPresetInfo()
-    }
+    // Reactive state that automatically updates when preferences change
+    val preferences by preferencesManager.preferences
+    val currentActivePreset: Pair<String?, PresetType> = (preferences.currentPresetName to preferences.lastSelectedPresetType)
     
     // Helper function to clear active preset when manual changes are made
     fun clearActivePresetOnManualChange() {
-        currentActivePreset = null to PresetType.DEFAULT
+        preferencesManager.updateReaderSettings(settings, null, PresetType.DEFAULT)
     }
     Scaffold(
         containerColor = theme.backgroundColor,
@@ -100,11 +96,9 @@ fun ReaderSettingsScreen(
                         currentSettings = settings,
                         currentPresetInfo = currentActivePreset,
                         onLoadPreset = { preset, presetType ->
-                            // Update UI state immediately
-                            currentActivePreset = preset.name to presetType
                             // Update settings
                             onSettingsChange(preset.settings)
-                            // Save to preferences
+                            // Save to preferences (state will update automatically via reactive flow)
                             preferencesManager.updateReaderSettings(
                                 preset.settings, 
                                 preset.name, 
@@ -112,11 +106,9 @@ fun ReaderSettingsScreen(
                             )
                         },
                         onResetToDefaults = { 
-                            // Update UI state immediately
-                            currentActivePreset = null to PresetType.DEFAULT
                             // Update settings
                             onSettingsChange(ReaderPreset.getDefaultSettings())
-                            // Save to preferences
+                            // Save to preferences (state will update automatically via reactive flow)
                             preferencesManager.resetToDefaults()
                         },
                         theme = theme
@@ -220,11 +212,9 @@ fun ReaderSettingsScreen(
                         savedPresets = savedPresets,
                         currentPresetInfo = currentActivePreset,
                         onLoadPreset = { preset, presetType ->
-                            // Update UI state immediately
-                            currentActivePreset = preset.name to presetType
                             // Update settings
                             onSettingsChange(preset.settings)
-                            // Save to preferences
+                            // Save to preferences (state will update automatically via reactive flow)
                             preferencesManager.updateReaderSettings(
                                 preset.settings, 
                                 preset.name, 
@@ -240,9 +230,7 @@ fun ReaderSettingsScreen(
                                     name = "Custom ${slot + 1}",
                                     settings = settings
                                 )
-                                // Update UI state immediately
-                                currentActivePreset = newPreset.name to PresetType.CUSTOM
-                                // Save to preferences
+                                // Save to preferences (state will update automatically via reactive flow)
                                 preferencesManager.saveCustomPreset(slot, newPreset)
                                 preferencesManager.updateReaderSettings(
                                     settings,
@@ -280,9 +268,7 @@ fun ReaderSettingsScreen(
                                 name = "Custom ${presetToOverride + 1}",
                                 settings = settings
                             )
-                            // Update UI state immediately
-                            currentActivePreset = newPreset.name to PresetType.CUSTOM
-                            // Save to preferences
+                            // Save to preferences (state will update automatically via reactive flow)
                             preferencesManager.saveCustomPreset(presetToOverride, newPreset)
                             preferencesManager.updateReaderSettings(
                                 settings,

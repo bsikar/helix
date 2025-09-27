@@ -26,6 +26,7 @@ enum class ReadingMode(val displayName: String, val backgroundColor: Color, val 
     SEPIA("Sepia", Color(0xFFF7F3E9), Color(0xFF5D4E37)),
     DARK("Dark", Color(0xFF1C1C1E), Color(0xFFFFFFFF)),
     BLACK("Black", Color(0xFF000000), Color(0xFFFFFFFF)),
+    SYSTEM("System", Color(0xFFFFFFFF), Color(0xFF000000)), // Will adapt based on system theme
     // High contrast modes for accessibility
     HIGH_CONTRAST_LIGHT("High Contrast Light", Color(0xFFFFFFFF), Color(0xFF000000), true),
     HIGH_CONTRAST_DARK("High Contrast Dark", Color(0xFF000000), Color(0xFFFFFFFF), true),
@@ -47,7 +48,7 @@ data class ReaderPreset(
         fun getDefaultPresets(): List<ReaderPreset> {
             return listOf(
                 ReaderPreset(
-                    name = "Day Reading",
+                    name = "Day",
                     settings = ReaderSettings(
                         fontSize = 16,
                         lineHeight = 1.5f,
@@ -60,7 +61,7 @@ data class ReaderPreset(
                     isCustom = false
                 ),
                 ReaderPreset(
-                    name = "Night Mode",
+                    name = "Night",
                     settings = ReaderSettings(
                         fontSize = 18,
                         lineHeight = 1.6f,
@@ -73,19 +74,26 @@ data class ReaderPreset(
                     isCustom = false
                 ),
                 ReaderPreset(
-                    name = "Comfort Reading",
+                    name = "Sepia",
                     settings = ReaderSettings(
-                        fontSize = 20,
-                        lineHeight = 1.8f,
+                        fontSize = 17,
+                        lineHeight = 1.6f,
                         brightness = 0.9f,
                         readingMode = ReadingMode.SEPIA,
                         textAlign = TextAlignment.JUSTIFY,
-                        marginHorizontal = 32,
-                        marginVertical = 24
+                        marginHorizontal = 26,
+                        marginVertical = 18
                     ),
                     isCustom = false
-                ),
-                // Accessibility presets
+                )
+            )
+        }
+        
+        /**
+         * Get accessibility presets separately (can be shown in an accessibility section)
+         */
+        fun getAccessibilityPresets(): List<ReaderPreset> {
+            return listOf(
                 ReaderPreset(
                     name = "Large Text",
                     settings = ReaderSettings(

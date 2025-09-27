@@ -6,7 +6,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -37,6 +39,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.ui.text.TextStyle
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.bsikar.helix.data.model.Book
+import com.bsikar.helix.data.model.ReadingStatus
 import com.bsikar.helix.data.ReaderSettings
 import com.bsikar.helix.data.ReadingMode
 import com.bsikar.helix.data.TextAlignment
@@ -86,6 +89,7 @@ fun ReaderScreen(
     var showChapterDialog by remember { mutableStateOf(false) }
     var showBookmarkDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     
     // State from ReaderViewModel
     val parsedEpub by readerViewModel.parsedEpub.collectAsState()
@@ -101,6 +105,98 @@ fun ReaderScreen(
     val currentChapter by readerViewModel.currentChapter.collectAsState()
     val readingProgressPercentage by readerViewModel.readingProgressPercentage.collectAsState()
     
+    // Reading progress tracking
+    val currentReadingProgress by readerViewModel.currentReadingProgress.collectAsState()
+    
+    // Scroll state for LazyColumn
+    val lazyListState = rememberLazyListState()
+    
+    // Track if we've already restored scroll position for this book
+    var hasRestoredScrollPosition by remember { mutableStateOf(false) }
+    
+    // Track scroll position changes with direct values
+    LaunchedEffect(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset, hasRestoredScrollPosition) {
+        // Only track scroll changes after we've restored the initial position
+        if (hasRestoredScrollPosition) {
+            val currentItem = lazyListState.firstVisibleItemIndex
+            val itemOffset = lazyListState.firstVisibleItemScrollOffset
+            
+            android.util.Log.d("ReaderScreen", "Saving scroll: item=$currentItem, offset=$itemOffset")
+            readerViewModel.updateScrollPosition(currentItem, itemOffset)
+        }
+    }
+    
+    // Save progress when leaving the screen
+    DisposableEffect(Unit) {
+        onDispose {
+            // Ensure we save the current position when the screen is disposed
+            if (hasRestoredScrollPosition) {
+                try {
+                    val currentItem = lazyListState.firstVisibleItemIndex
+                    val itemOffset = lazyListState.firstVisibleItemScrollOffset
+                    android.util.Log.d("ReaderScreen", "Disposing - saving final scroll position: item=$currentItem, offset=$itemOffset")
+                    readerViewModel.updateScrollPosition(currentItem, itemOffset)
+                } catch (e: Exception) {
+                    android.util.Log.w("ReaderScreen", "Failed to save scroll position on dispose", e)
+                }
+                readerViewModel.endReadingSession()
+            }
+        }
+    }
+    
+    // Reset restoration flag when book changes
+    LaunchedEffect(book.id) {
+        hasRestoredScrollPosition = false
+    }
+    
+    // Restore scroll position when reading progress is loaded (only once per book)
+    LaunchedEffect(currentReadingProgress, hasRestoredScrollPosition, currentContent.size, currentChapterIndex) {
+        if (!hasRestoredScrollPosition && currentContent.isNotEmpty()) {
+            val progress = currentReadingProgress
+            if (progress != null && progress.chapterIndex == currentChapterIndex) {
+                // Only restore if we're on the same chapter as the saved progress
+                val targetItem = progress.scrollItemIndex
+                val targetOffset = progress.scrollItemOffset
+                
+                // Ensure target item is within bounds
+                val maxItem = (currentContent.size - 1).coerceAtLeast(0)
+                val safeTargetItem = targetItem.coerceIn(0, maxItem)
+                val safeTargetOffset = targetOffset.coerceAtLeast(0)
+                
+                android.util.Log.d("ReaderScreen", "Restoring scroll: item=$safeTargetItem/$maxItem, offset=$safeTargetOffset")
+                
+                scope.launch {
+                    try {
+                        // Add a small delay to ensure LazyColumn is fully composed
+                        kotlinx.coroutines.delay(200)
+                        lazyListState.animateScrollToItem(safeTargetItem, safeTargetOffset)
+                        hasRestoredScrollPosition = true
+                        android.util.Log.d("ReaderScreen", "Successfully restored scroll position")
+                    } catch (e: Exception) {
+                        // Fallback to top if scroll position is invalid
+                        android.util.Log.w("ReaderScreen", "Failed to restore scroll position, falling back to top", e)
+                        try {
+                            lazyListState.scrollToItem(0, 0)
+                        } catch (fallbackException: Exception) {
+                            android.util.Log.w("ReaderScreen", "Even fallback scroll failed", fallbackException)
+                        }
+                        hasRestoredScrollPosition = true
+                    }
+                }
+            } else {
+                // Different chapter or no progress, start from top
+                android.util.Log.d("ReaderScreen", "Starting from top - different chapter or no progress")
+                hasRestoredScrollPosition = true
+            }
+        } else if (!hasRestoredScrollPosition && currentContent.isEmpty()) {
+            // If no content yet, wait for it to load
+            android.util.Log.d("ReaderScreen", "Waiting for content to load...")
+        } else if (!hasRestoredScrollPosition) {
+            // Fallback case
+            hasRestoredScrollPosition = true
+        }
+    }
+    
     // Use dynamic chapter count for imported EPUBs - ensure non-zero value during loading
     val totalPages = remember(parsedEpub, book.totalPages) {
         if (book.isImported && parsedEpub != null) {
@@ -110,11 +206,11 @@ fun ReaderScreen(
         }
     }
     
-    // Get bookmarks for this book
-    val bookmarks by remember { derivedStateOf { preferencesManager.getBookmarks(book.id) } }
+    // Get bookmarks for this book using reactive Flow
+    val bookmarks by preferencesManager.getBookmarksFlow(book.id).collectAsState(initial = emptyList())
     val isCurrentPageBookmarked by remember { 
         derivedStateOf { 
-            preferencesManager.isPageBookmarked(book.id, currentChapterIndex, currentPage) 
+            bookmarks.any { it.bookId == book.id && it.chapterNumber == currentChapterIndex && it.pageNumber == currentPage }
         } 
     }
     
@@ -134,11 +230,22 @@ fun ReaderScreen(
     // Load book content when book changes
     LaunchedEffect(book.id) {
         readerViewModel.loadBook(book)
+        
+        // Auto-start reading if book is in "Plan to Read" status
+        if (book.readingStatus == ReadingStatus.PLAN_TO_READ) {
+            onUpdateReadingPosition(book.id, maxOf(1, book.currentPage), maxOf(1, book.currentChapter), book.scrollPosition)
+        }
     }
     
     // Save reading position when page or chapter changes
     LaunchedEffect(currentPage, currentChapterIndex) {
-        onUpdateReadingPosition(book.id, currentPage, currentChapterIndex + 1, 0) // scrollPosition = 0 for now
+        // Get current scroll position from LazyListState
+        val currentScrollPosition = try {
+            lazyListState.firstVisibleItemIndex * 1000 + lazyListState.firstVisibleItemScrollOffset
+        } catch (e: Exception) {
+            0 // Fallback to 0 if LazyListState is not initialized
+        }
+        onUpdateReadingPosition(book.id, currentPage, currentChapterIndex + 1, currentScrollPosition)
     }
     
     // Get chapters from parsed EPUB or use sample chapters for non-imported books
@@ -230,15 +337,27 @@ fun ReaderScreen(
                     Box(
                         modifier = Modifier.combinedClickable(
                             onClick = { 
-                                // Short press: add bookmark instantly (regardless of current state)
-                                val newBookmark = Bookmark(
-                                    bookId = book.id,
-                                    bookTitle = book.title,
-                                    chapterNumber = currentChapterIndex,
-                                    pageNumber = currentPage,
-                                    scrollPosition = 0 // Scroll position tracking temporarily disabled
-                                )
-                                preferencesManager.addBookmark(newBookmark)
+                                // Short press: toggle bookmark (add if not bookmarked, remove if bookmarked)
+                                if (isCurrentPageBookmarked) {
+                                    // Remove the existing bookmark for this page
+                                    val existingBookmark = bookmarks.find { 
+                                        it.bookId == book.id && it.chapterNumber == currentChapterIndex && it.pageNumber == currentPage 
+                                    }
+                                    existingBookmark?.let { bookmark ->
+                                        preferencesManager.removeBookmark(bookmark.id)
+                                    }
+                                } else {
+                                    // Add a new bookmark
+                                    val currentScrollPosition = lazyListState.firstVisibleItemIndex * 1000 + lazyListState.firstVisibleItemScrollOffset
+                                    val newBookmark = Bookmark(
+                                        bookId = book.id,
+                                        bookTitle = book.title,
+                                        chapterNumber = currentChapterIndex,
+                                        pageNumber = currentPage,
+                                        scrollPosition = currentScrollPosition
+                                    )
+                                    preferencesManager.addBookmark(newBookmark)
+                                }
                             },
                             onLongClick = {
                                 // Long press: always show bookmark management dialog
@@ -250,7 +369,7 @@ fun ReaderScreen(
                     ) {
                             Icon(
                                 if (isCurrentPageBookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
-                                contentDescription = if (isCurrentPageBookmarked) "Manage bookmarks" else "Add bookmark",
+                                contentDescription = if (isCurrentPageBookmarked) "Remove bookmark" else "Add bookmark",
                                 tint = if (isCurrentPageBookmarked) theme.accentColor else theme.secondaryTextColor
                             )
                             // Show badge if there are multiple bookmarks
@@ -288,15 +407,7 @@ fun ReaderScreen(
                 } else {
                     totalPages
                 },
-                progress = if (book.isImported) {
-                    if (parsedEpub != null && totalPages > 0) {
-                        (currentChapterIndex + 1).toFloat() / totalPages
-                    } else {
-                        0f
-                    }
-                } else {
-                    if (totalPages > 0) currentPage.toFloat() / totalPages else 0f
-                },
+                progress = book.progress, // Use the book's stored progress
                 onPreviousPage = { 
                     if (book.isImported && parsedEpub != null) {
                         // Chapter-based navigation for EPUBs
@@ -327,17 +438,7 @@ fun ReaderScreen(
         ) {
             // Progress indicator
             LinearProgressIndicator(
-                progress = { 
-                    if (book.isImported) {
-                        if (parsedEpub != null && totalPages > 0) {
-                            (currentChapterIndex + 1).toFloat() / totalPages
-                        } else {
-                            0f
-                        }
-                    } else {
-                        if (totalPages > 0) currentPage.toFloat() / totalPages else 0f
-                    }
-                },
+                progress = { book.progress }, // Use the book's stored progress
                 modifier = Modifier.fillMaxWidth(),
                 color = theme.accentColor,
                 trackColor = theme.secondaryTextColor.copy(alpha = 0.2f)
@@ -401,22 +502,25 @@ fun ReaderScreen(
                 // Create a stable snapshot of content to prevent concurrent modification crashes
                 val stableContent = remember(currentContent) { currentContent.toList() }
                 
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(
-                        horizontal = readerSettings.marginHorizontal.dp,
-                        vertical = readerSettings.marginVertical.dp
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(
-                        count = stableContent.size,
-                        key = { index -> "content_$index" }
-                    ) { index ->
-                        // Safety check to prevent index out of bounds
-                        if (index < stableContent.size) {
-                            val element = stableContent[index]
-                            when (element) {
+                // Only show LazyColumn if we have content and it's stable
+                if (stableContent.isNotEmpty()) {
+                    LazyColumn(
+                        state = lazyListState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            horizontal = readerSettings.marginHorizontal.dp,
+                            vertical = readerSettings.marginVertical.dp
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(
+                            count = stableContent.size,
+                            key = { index -> "${currentChapterIndex}_content_$index" }
+                        ) { index ->
+                            // Safety check to prevent index out of bounds
+                            if (index < stableContent.size) {
+                                val element = stableContent[index]
+                                when (element) {
                                 is ContentElement.TextElement -> {
                                     val textStyle = createAccessibleTextStyle(readerSettings)
                                     Text(
@@ -459,6 +563,25 @@ fun ReaderScreen(
                                     }
                                 }
                             }
+                            }
+                        }
+                    }
+                } else {
+                    // Show loading or empty state when content is empty
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isLoadingChapter) {
+                            CircularProgressIndicator(
+                                color = theme.accentColor
+                            )
+                        } else {
+                            Text(
+                                text = "No content available",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = theme.secondaryTextColor
+                            )
                         }
                     }
                 }
@@ -473,9 +596,13 @@ fun ReaderScreen(
             tableOfContents = tableOfContents,
             currentChapter = currentChapter,
             readingProgress = readingProgressPercentage,
-            onChapterSelect = { chapter ->
-                readerViewModel.navigateToChapter(chapter)
-                currentPage = 1 // Reset to first page of chapter
+            onChapterSelect = { selectedChapter ->
+                // Find the index of the selected chapter
+                val chapterIndex = chapters.indexOfFirst { it.id == selectedChapter.id }
+                if (chapterIndex != -1) {
+                    readerViewModel.navigateToChapter(chapterIndex, context)
+                    currentPage = 1 // Reset to first page of chapter
+                }
                 showChapterDialog = false
             },
             onDismiss = { showChapterDialog = false }
@@ -488,10 +615,20 @@ fun ReaderScreen(
             bookmarks = bookmarks,
             onDismiss = { showBookmarkDialog = false },
             onBookmarkClick = { bookmark ->
-                // Navigate to bookmarked location
+                // Navigate to bookmarked location using ReaderViewModel
+                readerViewModel.navigateToBookmark(bookmark, context)
                 currentPage = bookmark.pageNumber
-                // Note: In a real implementation, you'd also update scroll position
-                // Note: scroll position restoration temporarily disabled
+                // Restore scroll position from bookmark
+                scope.launch {
+                    try {
+                        val targetItem = bookmark.scrollPosition / 1000
+                        val targetOffset = bookmark.scrollPosition % 1000
+                        lazyListState.scrollToItem(targetItem, targetOffset)
+                    } catch (e: Exception) {
+                        // If scroll position restoration fails, just go to top of page
+                        lazyListState.scrollToItem(0, 0)
+                    }
+                }
                 showBookmarkDialog = false
             },
             onBookmarkDelete = { bookmarkId ->
@@ -509,7 +646,7 @@ fun ReaderScreen(
                     bookTitle = book.title,
                     chapterNumber = currentChapterIndex,
                     pageNumber = currentPage,
-                    scrollPosition = 0 // Scroll position tracking temporarily disabled
+                    scrollPosition = lazyListState.firstVisibleItemIndex * 1000 + lazyListState.firstVisibleItemScrollOffset
                 )
                 preferencesManager.addBookmark(newBookmark)
             }
@@ -565,7 +702,7 @@ fun ReaderBottomBar(
                     fontWeight = FontWeight.Medium
                 )
                 Text(
-                    text = "${(progress * 100).toInt()}% complete",
+                    text = "${kotlin.math.round(progress * 100).toInt()}% complete",
                     fontSize = 12.sp,
                     color = theme.secondaryTextColor
                 )
@@ -1295,11 +1432,10 @@ private fun createAccessibleTextStyle(
     // Determine text color based on high contrast settings
     val textColor = if (readerSettings.highContrast) {
         when (readerSettings.readingMode) {
-            ReadingMode.LIGHT, ReadingMode.SEPIA -> Color.Black
+            ReadingMode.LIGHT, ReadingMode.SEPIA, ReadingMode.SYSTEM -> Color.Black
             ReadingMode.DARK, ReadingMode.BLACK -> Color.White
-            ReadingMode.HIGH_CONTRAST_LIGHT -> Color.Black
+            ReadingMode.HIGH_CONTRAST_LIGHT, ReadingMode.HIGH_CONTRAST_YELLOW -> Color.Black
             ReadingMode.HIGH_CONTRAST_DARK -> Color.White
-            ReadingMode.HIGH_CONTRAST_YELLOW -> Color.Black
         }
     } else {
         readerSettings.readingMode.textColor
@@ -1325,11 +1461,11 @@ private fun createAccessibleTextStyle(
 private fun getAccessibleBackgroundColor(readerSettings: ReaderSettings): Color {
     return if (readerSettings.highContrast) {
         when (readerSettings.readingMode) {
-            ReadingMode.LIGHT, ReadingMode.SEPIA -> Color.White
+            ReadingMode.LIGHT, ReadingMode.SEPIA, ReadingMode.SYSTEM -> Color.White
             ReadingMode.DARK, ReadingMode.BLACK -> Color.Black
             ReadingMode.HIGH_CONTRAST_LIGHT -> Color.White
             ReadingMode.HIGH_CONTRAST_DARK -> Color.Black
-            ReadingMode.HIGH_CONTRAST_YELLOW -> Color(0xFFFFFF00)
+            ReadingMode.HIGH_CONTRAST_YELLOW -> Color.Yellow
         }
     } else {
         readerSettings.readingMode.backgroundColor

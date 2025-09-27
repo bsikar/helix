@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
@@ -32,7 +35,10 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bsikar.helix.data.ImportProgress
+import com.bsikar.helix.data.ImportResult
+import com.bsikar.helix.data.ImportFailure
 import com.bsikar.helix.data.LibraryManager
+import com.bsikar.helix.managers.ImportManager
 import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.theme.ThemeManager
 import com.bsikar.helix.theme.ThemeMode
@@ -52,7 +58,8 @@ fun SettingsScreen(
     theme: AppTheme,
     onBackClick: () -> Unit,
     libraryManager: LibraryManager? = null,
-    scrollToSection: String? = null
+    scrollToSection: String? = null,
+    importManager: ImportManager? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -60,6 +67,7 @@ fun SettingsScreen(
     
     // Get import progress from LibraryManager
     val importProgress by libraryManager?.importProgress ?: remember { mutableStateOf(null) }
+    val lastImportResult by libraryManager?.lastImportResult ?: remember { mutableStateOf(null) }
     val isLoading by libraryManager?.isLoading ?: remember { mutableStateOf(false) }
     
     // Scroll state for auto-scrolling to sections
@@ -138,7 +146,8 @@ fun SettingsScreen(
                             },
                             onImportComplete = { success, message ->
                                 importMessage = message
-                            }
+                            },
+                            importManager = importManager
                         )
                     }
                 }
@@ -214,8 +223,16 @@ fun SettingsScreen(
                 }
             }
             
-            // Show result message
-            if (importMessage.isNotEmpty() && importProgress == null) {
+            // Show import results if available, otherwise show import message
+            if (lastImportResult != null && importProgress == null) {
+                item {
+                    ImportResultCard(
+                        importResult = lastImportResult!!,
+                        theme = theme,
+                        onDismiss = { libraryManager?.clearLastImportResult() }
+                    )
+                }
+            } else if (importMessage.isNotEmpty() && importProgress == null) {
                 item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
@@ -312,80 +329,38 @@ fun ThemeSelector(
     onThemeChange: (ThemeMode) -> Unit,
     theme: AppTheme
 ) {
-    var showReaderThemes by remember { mutableStateOf(false) }
-    
     Column(modifier = Modifier.fillMaxWidth()) {
-        // Main theme categories
         Text(
-            text = "App Theme",
+            text = "Theme",
             color = theme.primaryTextColor,
             fontSize = 16.sp,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(bottom = 8.dp)
         )
         
-        // Basic themes
-        val basicThemes = if (ThemeManager.isDynamicColorSupported()) {
-            listOf(ThemeMode.LIGHT, ThemeMode.DARK, ThemeMode.SYSTEM, ThemeMode.DYNAMIC)
-        } else {
-            listOf(ThemeMode.LIGHT, ThemeMode.DARK, ThemeMode.SYSTEM)
-        }
+        // Unified theme selection with Light, Dark, Sepia, and System
+        val availableThemes = listOf(
+            ThemeMode.LIGHT,
+            ThemeMode.DARK,
+            ThemeMode.SEPIA,
+            ThemeMode.SYSTEM
+        )
         
-        LazyRow(
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxWidth()
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(180.dp)
         ) {
-            items(basicThemes) { themeMode ->
+            items(availableThemes) { themeMode ->
                 ThemeCard(
                     themeMode = themeMode,
                     isSelected = currentTheme == themeMode,
                     onClick = { onThemeChange(themeMode) },
                     theme = theme
                 )
-            }
-        }
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        // Reader themes toggle
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { showReaderThemes = !showReaderThemes }
-                .padding(vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Reader-Optimized Themes",
-                color = theme.primaryTextColor,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Icon(
-                imageVector = if (showReaderThemes) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                contentDescription = if (showReaderThemes) "Hide reader themes" else "Show reader themes",
-                tint = theme.accentColor
-            )
-        }
-        
-        // Reader themes (collapsible)
-        if (showReaderThemes) {
-            val readerThemes = ThemeManager.getReaderThemeModes()
-            
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                items(readerThemes) { themeMode ->
-                    ThemeCard(
-                        themeMode = themeMode,
-                        isSelected = currentTheme == themeMode,
-                        onClick = { onThemeChange(themeMode) },
-                        theme = theme,
-                        isReaderTheme = true
-                    )
-                }
             }
         }
     }
@@ -396,8 +371,7 @@ private fun ThemeCard(
     themeMode: ThemeMode,
     isSelected: Boolean,
     onClick: () -> Unit,
-    theme: AppTheme,
-    isReaderTheme: Boolean = false
+    theme: AppTheme
 ) {
     val themeColors = getThemePreviewColors(themeMode)
     
@@ -424,7 +398,7 @@ private fun ThemeCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(24.dp)
+                    .height(32.dp)
             ) {
                 Box(
                     modifier = Modifier
@@ -440,25 +414,16 @@ private fun ThemeCard(
                 )
             }
             
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             
             // Theme name
             Text(
                 text = themeMode.displayName,
                 color = theme.primaryTextColor,
-                fontSize = 10.sp,
-                maxLines = 2
+                fontSize = 12.sp,
+                maxLines = 2,
+                fontWeight = FontWeight.Medium
             )
-            
-            // Reader indicator
-            if (isReaderTheme) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.MenuBook,
-                    contentDescription = "Reader optimized",
-                    modifier = Modifier.size(12.dp),
-                    tint = theme.accentColor
-                )
-            }
         }
     }
 }
@@ -726,7 +691,8 @@ fun LibraryManagementOptions(
     theme: AppTheme,
     isLoading: Boolean,
     onImportStart: () -> Unit,
-    onImportComplete: (Boolean, String) -> Unit
+    onImportComplete: (Boolean, String) -> Unit,
+    importManager: ImportManager? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -739,6 +705,7 @@ fun LibraryManagementOptions(
             onImportStart()
             scope.launch {
                 try {
+                    // Proceed with import using LibraryManager (it has its own duplicate checking)
                     val file = File(context.cacheDir, "temp_epub_${System.currentTimeMillis()}.epub")
                     context.contentResolver.openInputStream(uri)?.use { input ->
                         file.outputStream().use { output ->
@@ -899,6 +866,117 @@ fun SettingsItem(
             fontSize = 13.sp,
             color = theme.secondaryTextColor
         )
+    }
+}
+
+@Composable
+fun ImportResultCard(
+    importResult: ImportResult,
+    theme: AppTheme,
+    onDismiss: () -> Unit = {}
+) {
+    var showFailureDetails by remember { mutableStateOf(false) }
+    
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (importResult.failedCount > 0) 
+                Color(0xFFFF9800).copy(alpha = 0.1f) 
+            else 
+                theme.accentColor.copy(alpha = 0.1f)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = importResult.getDisplayMessage(),
+                    color = if (importResult.failedCount > 0) Color(0xFFFF9800) else theme.accentColor,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Dismiss",
+                        modifier = Modifier.size(16.dp),
+                        tint = theme.secondaryTextColor
+                    )
+                }
+            }
+            
+            if (importResult.failedCount > 0) {
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Row(
+                    modifier = Modifier
+                        .clickable { showFailureDetails = !showFailureDetails }
+                        .fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        if (showFailureDetails) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (showFailureDetails) "Hide details" else "Show details",
+                        tint = Color(0xFFFF9800),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "View failed imports",
+                        color = Color(0xFFFF9800),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                
+                if (showFailureDetails) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    importResult.failures.forEach { failure ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = Color.Red.copy(alpha = 0.05f)
+                            )
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp)
+                            ) {
+                                Text(
+                                    text = failure.fileName,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = theme.primaryTextColor
+                                )
+                                Text(
+                                    text = "Path: ${failure.filePath}",
+                                    fontSize = 11.sp,
+                                    color = theme.secondaryTextColor
+                                )
+                                Text(
+                                    text = "Error: ${failure.errorMessage}",
+                                    fontSize = 11.sp,
+                                    color = Color.Red
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

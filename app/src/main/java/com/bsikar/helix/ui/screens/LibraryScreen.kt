@@ -65,7 +65,14 @@ fun LibraryScreen(
     errorMessage: String? = null,
     searchQuery: String = "",
     onSearchQueryChange: (String) -> Unit = {},
-    importManager: ImportManager? = null
+    importManager: ImportManager? = null,
+    // Sorting states and functions
+    readingSortAscending: Boolean = false,
+    planToReadSortAscending: Boolean = true,
+    completedSortAscending: Boolean = true,
+    onToggleReadingSort: () -> Unit = {},
+    onTogglePlanToReadSort: () -> Unit = {},
+    onToggleCompletedSort: () -> Unit = {}
 ) {
     // Search query now comes from ViewModel instead of local state
     val scope = rememberCoroutineScope()
@@ -75,14 +82,19 @@ fun LibraryScreen(
     val importProgress by importManager?.importProgress?.collectAsState(initial = emptyList()) ?: remember { mutableStateOf(emptyList()) }
     
     // Create mutable internal lists to allow book updates
-    // Use a key that includes book properties to detect internal book changes
-    val readingBooksKey = readingBooks.map { "${it.id}-${it.coverDisplayMode}-${it.userSelectedColor}" }.joinToString(",")
-    val planToReadBooksKey = planToReadBooks.map { "${it.id}-${it.coverDisplayMode}-${it.userSelectedColor}" }.joinToString(",")
-    val completedBooksKey = completedBooks.map { "${it.id}-${it.coverDisplayMode}-${it.userSelectedColor}" }.joinToString(",")
+    // Use keys that include order to ensure recomposition when sorting changes
+    val readingBooksKey = remember(readingBooks.size, readingSortAscending) { readingBooks.map { it.id }.joinToString(",") }
+    val planToReadBooksKey = remember(planToReadBooks.size, planToReadSortAscending) { planToReadBooks.map { it.id }.joinToString(",") }
+    val completedBooksKey = remember(completedBooks.size, completedSortAscending) { completedBooks.map { it.id }.joinToString(",") }
     
     var internalReadingBooks by remember(readingBooksKey) { mutableStateOf(readingBooks) }
     var internalPlanToReadBooks by remember(planToReadBooksKey) { mutableStateOf(planToReadBooks) }
     var internalCompletedBooks by remember(completedBooksKey) { mutableStateOf(completedBooks) }
+    
+    // Sync internal lists when source lists change (including sorting changes)
+    LaunchedEffect(readingBooksKey) { internalReadingBooks = readingBooks }
+    LaunchedEffect(planToReadBooksKey) { internalPlanToReadBooks = planToReadBooks }
+    LaunchedEffect(completedBooksKey) { internalCompletedBooks = completedBooks }
     
     // Function to update a book in the appropriate list
     val updateBookInLists = { updatedBook: com.bsikar.helix.data.model.Book ->
@@ -122,8 +134,7 @@ fun LibraryScreen(
         // Import will be automatically removed from active list when completed
     }
     
-    // Pull-to-refresh functionality  
-    var scanMessage by remember { mutableStateOf("") }
+    // Pull-to-refresh functionality
     
     // Responsive configuration
     val responsiveConfig = ResponsiveConfig.fromScreenWidth()
@@ -181,22 +192,11 @@ fun LibraryScreen(
         }
     }
     val onRefresh = {
-        if (libraryManager != null) {
-            isRefreshing = true
-            scanMessage = "Scanning for new books..."
-            libraryManager.rescanWatchedDirectoriesAsync { success, message, newCount ->
-                isRefreshing = false
-                scanMessage = if (success) {
-                    if (newCount > 0) "Found $newCount new books!" else "No new books found"
-                } else {
-                    "Scan failed: $message"
-                }
-                // Clear message after 3 seconds
-                scope.launch {
-                    kotlinx.coroutines.delay(3000)
-                    scanMessage = ""
-                }
-            }
+        isRefreshing = true
+        // Simple refresh without scanning - just update the UI state
+        scope.launch {
+            kotlinx.coroutines.delay(500) // Brief delay for visual feedback
+            isRefreshing = false
         }
     }
 
@@ -354,7 +354,7 @@ fun LibraryScreen(
                             textAlign = TextAlign.Center
                         )
                         Button(
-                            onClick = onRefresh,
+                            onClick = { onRefresh() },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = theme.accentColor
                             )
@@ -371,7 +371,7 @@ fun LibraryScreen(
                 PullToRefreshBox(
                     modifier = Modifier.fillMaxSize(),
                     isRefreshing = isRefreshing,
-                    onRefresh = onRefresh
+                    onRefresh = { onRefresh() }
                 ) {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
@@ -400,64 +400,35 @@ fun LibraryScreen(
                 }
             }
             
-            // Show scan status message
-            if (scanMessage.isNotEmpty()) {
-                item(key = "scan_message") {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (scanMessage.contains("Found") && !scanMessage.contains("No new")) 
-                                theme.accentColor.copy(alpha = 0.1f) 
-                            else 
-                                theme.surfaceColor
-                        ),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            if (isRefreshing) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    color = theme.accentColor,
-                                    strokeWidth = 2.dp
-                                )
-                            }
-                            Text(
-                                text = scanMessage,
-                                color = if (scanMessage.contains("Found") && !scanMessage.contains("No new")) 
-                                    theme.accentColor 
-                                else 
-                                    theme.primaryTextColor,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-                }
-            }
 
+            // Always show Reading section
+            item(key = "reading_header") {
+                LibrarySectionHeader(
+                    title = "Reading",
+                    subtitle = "Last read",
+                    theme = theme,
+                    isAscending = readingSortAscending,
+                    onSortClick = onToggleReadingSort,
+                    onSeeAllClick = { onSeeAllClick("Reading", internalReadingBooks) }
+                )
+            }
             if (internalReadingBooks.isNotEmpty()) {
-                item(key = "reading_header") {
-                    LibrarySectionHeader(
-                        title = "Reading",
-                        subtitle = "Last read",
-                        theme = theme,
-                        isAscending = false, // TODO: Connect to ViewModel sorting state
-                        onSortClick = { /* TODO: Connect to ViewModel sorting functions */ },
-                        onSeeAllClick = { onSeeAllClick("Reading", internalReadingBooks) }
-                    )
-                }
-                item(key = "reading_books") {
+                item(key = "reading_books_${internalReadingBooks.size}") {
                     ResponsiveBookSection(
                         books = internalReadingBooks,
                         showProgress = true
+                    )
+                }
+            } else {
+                item(key = "reading_empty") {
+                    Text(
+                        text = "No books currently being read.\nStart reading a book from your 'Plan to Read' list!",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        textAlign = TextAlign.Center,
+                        color = theme.secondaryTextColor,
+                        fontSize = 14.sp
                     )
                 }
             }
@@ -468,12 +439,12 @@ fun LibraryScreen(
                         title = "Plan to read",
                         subtitle = "Title",
                         theme = theme,
-                        isAscending = true, // TODO: Connect to ViewModel sorting state
-                        onSortClick = { /* TODO: Connect to ViewModel sorting functions */ },
+                        isAscending = planToReadSortAscending,
+                        onSortClick = onTogglePlanToReadSort,
                         onSeeAllClick = { onSeeAllClick("Plan to read", internalPlanToReadBooks) }
                     )
                 }
-                item(key = "plan_to_read_books") {
+                item(key = "plan_to_read_books_${internalPlanToReadBooks.size}") {
                     ResponsiveBookSection(
                         books = internalPlanToReadBooks,
                         showProgress = false
@@ -487,12 +458,12 @@ fun LibraryScreen(
                         title = "Read",
                         subtitle = "Title",
                         theme = theme,
-                        isAscending = true, // TODO: Connect to ViewModel sorting state
-                        onSortClick = { /* TODO: Connect to ViewModel sorting functions */ },
+                        isAscending = completedSortAscending,
+                        onSortClick = onToggleCompletedSort,
                         onSeeAllClick = { onSeeAllClick("Read", internalCompletedBooks) }
                     )
                 }
-                item(key = "read_books") {
+                item(key = "read_books_${internalCompletedBooks.size}") {
                     ResponsiveBookSection(
                         books = internalCompletedBooks,
                         showProgress = false
@@ -501,7 +472,7 @@ fun LibraryScreen(
             }
 
             if (internalReadingBooks.isEmpty() && internalPlanToReadBooks.isEmpty() && internalCompletedBooks.isEmpty()) {
-                item {
+                item(key = "no_books_found") {
                     Text(
                         text = "No books found.",
                         modifier = Modifier

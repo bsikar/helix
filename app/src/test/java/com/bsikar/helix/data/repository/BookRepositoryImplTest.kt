@@ -63,7 +63,8 @@ class BookRepositoryImplTest {
         testBookEntity.copy(
             id = "test-book-2",
             title = "Test Book 2",
-            progress = 0.0f
+            progress = 0.0f,
+            explicitReadingStatus = "PLAN_TO_READ"
         ),
         testBookEntity.copy(
             id = "test-book-3", 

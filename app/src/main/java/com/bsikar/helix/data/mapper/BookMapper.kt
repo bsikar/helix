@@ -58,7 +58,14 @@ fun BookEntity.toBook(): Book {
         },
         userSelectedColor = userSelectedColor,
         fileChecksum = fileChecksum,
-        userEditedMetadata = userEditedMetadata
+        userEditedMetadata = userEditedMetadata,
+        explicitReadingStatus = explicitReadingStatus?.let { statusString ->
+            try {
+                ReadingStatus.valueOf(statusString)
+            } catch (e: Exception) {
+                null
+            }
+        }
     )
 }
 
@@ -92,6 +99,7 @@ fun Book.toBookEntity(): BookEntity {
         coverDisplayMode = coverDisplayMode.name,
         userSelectedColor = userSelectedColor,
         fileChecksum = fileChecksum,
-        userEditedMetadata = userEditedMetadata
+        userEditedMetadata = userEditedMetadata,
+        explicitReadingStatus = explicitReadingStatus?.name
     )
 }

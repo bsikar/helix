@@ -7,9 +7,10 @@ import java.io.File
 
 @Serializable
 enum class ReadingStatus {
-    PLAN_TO_READ,
-    READING,
-    COMPLETED
+    UNREAD,        // Book is imported but not organized yet
+    PLAN_TO_READ,  // User explicitly added to reading plan  
+    READING,       // Currently reading
+    COMPLETED      // Finished reading
 }
 
 @Serializable
@@ -53,7 +54,10 @@ data class Book(
     
     // Cover display preferences
     val coverDisplayMode: CoverDisplayMode = CoverDisplayMode.AUTO,
-    val userSelectedColor: Long? = null // Override color selected by user
+    val userSelectedColor: Long? = null, // Override color selected by user
+    
+    // Explicit reading status (for new books, defaults to UNREAD)
+    val explicitReadingStatus: ReadingStatus? = null // null for backward compatibility
 ) {
     // Convenience property for UI
     val coverColorComposeColor: Color
@@ -116,9 +120,12 @@ data class Book(
     }
     val readingStatus: ReadingStatus
         get() = when {
-            progress == 0f -> ReadingStatus.PLAN_TO_READ
+            // If progress indicates reading or completed, use progress-based logic
             progress >= 1f -> ReadingStatus.COMPLETED
-            else -> ReadingStatus.READING
+            progress > 0f -> ReadingStatus.READING
+            // For 0 progress, use explicit status or default to UNREAD
+            explicitReadingStatus != null -> explicitReadingStatus!!
+            else -> ReadingStatus.UNREAD
         }
 
     fun getTimeAgoText(): String {

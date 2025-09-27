@@ -38,5 +38,8 @@ data class BookEntity(
     val coverDisplayMode: String = "AUTO", // CoverDisplayMode enum as string
     val userSelectedColor: Long? = null,
     val fileChecksum: String? = null,
-    val userEditedMetadata: Boolean = false
+    val userEditedMetadata: Boolean = false,
+    
+    // Explicit reading status for user organization
+    val explicitReadingStatus: String? = null // ReadingStatus enum as string, null for backward compatibility
 )

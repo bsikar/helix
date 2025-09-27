@@ -10,6 +10,8 @@ data class ReadingProgress(
     val chapterIndex: Int,
     val chapterTitle: String? = null,
     val scrollPosition: Int = 0,
+    val scrollItemIndex: Int = 0, // Exact item index in LazyColumn
+    val scrollItemOffset: Int = 0, // Exact offset within the item
     val pageNumber: Int = 1,
     val totalPagesInChapter: Int = 1,
     val readingTimeSeconds: Long = 0, // Time spent reading this session
@@ -87,12 +89,16 @@ data class ReadingProgress(
     fun withUpdatedPosition(
         newChapterIndex: Int = chapterIndex,
         newScrollPosition: Int = scrollPosition,
+        newScrollItemIndex: Int = scrollItemIndex,
+        newScrollItemOffset: Int = scrollItemOffset,
         newPageNumber: Int = pageNumber,
         additionalReadingTime: Long = 0
     ): ReadingProgress {
         return copy(
             chapterIndex = newChapterIndex,
             scrollPosition = newScrollPosition,
+            scrollItemIndex = newScrollItemIndex,
+            scrollItemOffset = newScrollItemOffset,
             pageNumber = newPageNumber,
             readingTimeSeconds = readingTimeSeconds + additionalReadingTime,
             lastUpdated = System.currentTimeMillis(),

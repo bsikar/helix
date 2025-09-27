@@ -97,6 +97,7 @@ private fun generateCssStyles(settings: ReaderSettings): String {
         ReadingMode.DARK -> "#121212"
         ReadingMode.SEPIA -> "#F4ECD8"
         ReadingMode.BLACK -> "#000000"
+        ReadingMode.SYSTEM -> "#FFFFFF" // Default to light, will adapt with system theme detection
         ReadingMode.HIGH_CONTRAST_LIGHT -> "#FFFFFF"
         ReadingMode.HIGH_CONTRAST_DARK -> "#000000"
         ReadingMode.HIGH_CONTRAST_YELLOW -> "#FFFF00"
@@ -107,6 +108,7 @@ private fun generateCssStyles(settings: ReaderSettings): String {
         ReadingMode.DARK -> "#E0E0E0"
         ReadingMode.SEPIA -> "#5C4B37"
         ReadingMode.BLACK -> "#FFFFFF"
+        ReadingMode.SYSTEM -> "#000000" // Default to light, will adapt with system theme detection
         ReadingMode.HIGH_CONTRAST_LIGHT -> "#000000"
         ReadingMode.HIGH_CONTRAST_DARK -> "#FFFFFF"
         ReadingMode.HIGH_CONTRAST_YELLOW -> "#000000"

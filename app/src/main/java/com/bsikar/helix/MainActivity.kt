@@ -9,6 +9,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.core.view.WindowCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.bsikar.helix.data.UserPreferencesManager
+import com.bsikar.helix.managers.ImportManager
 import com.bsikar.helix.theme.ThemeManager
 import com.bsikar.helix.theme.ThemeMode
 import com.bsikar.helix.ui.screens.MainApp
@@ -22,6 +23,9 @@ class MainActivity : ComponentActivity() {
     
     @Inject
     lateinit var preferencesManager: UserPreferencesManager
+    
+    @Inject
+    lateinit var importManager: ImportManager
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -60,7 +64,8 @@ class MainActivity : ComponentActivity() {
                     onThemeChange = { newTheme -> preferencesManager.updateTheme(newTheme) },
                     theme = theme,
                     preferencesManager = preferencesManager,
-                    libraryViewModel = libraryViewModel
+                    libraryViewModel = libraryViewModel,
+                    importManager = importManager
                 )
             }
         }

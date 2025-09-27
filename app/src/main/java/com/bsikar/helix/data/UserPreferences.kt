@@ -367,6 +367,10 @@ class UserPreferencesManager(
         }
     }
     
+    fun getBookmarksFlow(bookId: String): kotlinx.coroutines.flow.Flow<List<com.bsikar.helix.data.model.Bookmark>> {
+        return bookmarkRepository.getBookmarksForBookFlow(bookId)
+    }
+    
     fun addBookmark(bookmark: com.bsikar.helix.data.model.Bookmark) {
         scope.launch {
             bookmarkRepository.addBookmark(bookmark)

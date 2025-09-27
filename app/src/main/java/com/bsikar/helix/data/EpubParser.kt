@@ -197,12 +197,15 @@ class EpubParser(private val context: Context) {
             
             // Extract spine (reading order)
             val spine = extractSpine(opfDoc)
+            Log.d("EpubParser", "Extracted spine with ${spine.size} items: $spine")
             
             // Extract manifest (file list)
             val manifest = extractManifest(opfDoc)
+            Log.d("EpubParser", "Extracted manifest with ${manifest.size} items")
             
             // Read chapter contents
             val chapters = extractChapters(zipFile, spine, manifest, actualOpfPath)
+            Log.d("EpubParser", "Extracted ${chapters.size} chapters")
             
             // Skip table of contents during import for performance
             val toc = emptyList<EpubTocEntry>() // Load on-demand later if needed
@@ -273,17 +276,70 @@ class EpubParser(private val context: Context) {
     }
     
     private fun extractSpine(opfDoc: Document): List<String> {
-        return opfDoc.select("spine itemref").map { it.attr("idref") }
+        // Try different selectors to handle various EPUB formats and namespaces
+        val selectors = listOf(
+            "spine itemref",           // Standard selector
+            "spine > itemref",         // Direct child
+            "*|spine *|itemref",       // With namespaces
+            "itemref"                  // Fallback - just find all itemref elements
+        )
+        
+        for (selector in selectors) {
+            try {
+                val elements = opfDoc.select(selector)
+                if (elements.isNotEmpty()) {
+                    val spine = elements.map { it.attr("idref") }.filter { it.isNotEmpty() }
+                    Log.d("EpubParser", "Found spine using selector '$selector': $spine")
+                    if (spine.isNotEmpty()) {
+                        return spine
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("EpubParser", "Selector '$selector' failed: ${e.message}")
+            }
+        }
+        
+        Log.w("EpubParser", "No spine items found with any selector")
+        return emptyList()
     }
     
     private fun extractManifest(opfDoc: Document): Map<String, ManifestItem> {
         val manifest = mutableMapOf<String, ManifestItem>()
-        opfDoc.select("manifest item").forEach { item ->
-            val id = item.attr("id")
-            val href = item.attr("href")
-            val mediaType = item.attr("media-type")
-            manifest[id] = ManifestItem(id, href, mediaType)
+        
+        // Try different selectors to handle various EPUB formats and namespaces
+        val selectors = listOf(
+            "manifest item",           // Standard selector
+            "manifest > item",         // Direct child
+            "*|manifest *|item",       // With namespaces
+            "item"                     // Fallback - just find all item elements in manifest context
+        )
+        
+        for (selector in selectors) {
+            try {
+                val elements = opfDoc.select(selector)
+                if (elements.isNotEmpty()) {
+                    elements.forEach { item ->
+                        val id = item.attr("id")
+                        val href = item.attr("href")
+                        val mediaType = item.attr("media-type")
+                        if (id.isNotEmpty() && href.isNotEmpty()) {
+                            manifest[id] = ManifestItem(id, href, mediaType)
+                        }
+                    }
+                    if (manifest.isNotEmpty()) {
+                        Log.d("EpubParser", "Found manifest using selector '$selector' with ${manifest.size} items")
+                        break
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("EpubParser", "Manifest selector '$selector' failed: ${e.message}")
+            }
         }
+        
+        if (manifest.isEmpty()) {
+            Log.w("EpubParser", "No manifest items found with any selector")
+        }
+        
         return manifest
     }
     

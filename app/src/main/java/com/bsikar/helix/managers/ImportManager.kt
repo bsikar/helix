@@ -25,7 +25,8 @@ import javax.inject.Singleton
 class ImportManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val workManager: WorkManager,
-    private val importTaskDao: ImportTaskDao
+    private val importTaskDao: ImportTaskDao,
+    private val importedFileDao: com.bsikar.helix.data.source.dao.ImportedFileDao
 ) {
     
     // Create a supervisor scope for database operations
@@ -68,6 +69,12 @@ class ImportManager @Inject constructor(
         val isAlreadyImporting = importTaskDao.isFileBeingImported(fileUriString) > 0
         if (isAlreadyImporting) {
             throw IllegalStateException("File is already being imported")
+        }
+        
+        // Check if file has already been imported
+        val existingImportedFile = importedFileDao.getImportedFileByPath(fileUriString)
+        if (existingImportedFile != null) {
+            throw IllegalStateException("File has already been imported on ${java.text.SimpleDateFormat("MMM dd, yyyy 'at' HH:mm", java.util.Locale.getDefault()).format(java.util.Date(existingImportedFile.importedAt))}")
         }
 
         // Create import task record
@@ -177,6 +184,64 @@ class ImportManager @Inject constructor(
             total = pending + inProgress + completed + failed + cancelled
         )
     }
+    
+    /**
+     * Check if a file has already been imported
+     */
+    suspend fun isFileAlreadyImported(fileUri: Uri): Boolean {
+        return importedFileDao.getImportedFileByPath(fileUri.toString()) != null
+    }
+    
+    /**
+     * Check if a file has already been imported and return import info
+     */
+    suspend fun getImportedFileInfo(fileUri: Uri): ImportedFileInfo? {
+        val importedFile = importedFileDao.getImportedFileByPath(fileUri.toString())
+        return importedFile?.let {
+            ImportedFileInfo(
+                path = it.path,
+                importedAt = it.importedAt,
+                bookId = it.bookId
+            )
+        }
+    }
+    
+    /**
+     * Start importing multiple files with duplicate detection
+     */
+    suspend fun startBatchImport(files: List<Pair<Uri, String>>): BatchImportResult {
+        val duplicates = mutableListOf<String>()
+        val newFiles = mutableListOf<Pair<Uri, String>>()
+        val importIds = mutableListOf<String>()
+        
+        // Check each file for duplicates
+        for ((uri, fileName) in files) {
+            if (isFileAlreadyImported(uri)) {
+                duplicates.add(fileName)
+            } else {
+                newFiles.add(uri to fileName)
+            }
+        }
+        
+        // Import new files
+        for ((uri, fileName) in newFiles) {
+            try {
+                val importId = startImport(uri, fileName)
+                importIds.add(importId)
+            } catch (e: Exception) {
+                // If individual import fails, continue with others
+                android.util.Log.w("ImportManager", "Failed to start import for $fileName", e)
+            }
+        }
+        
+        return BatchImportResult(
+            totalFiles = files.size,
+            duplicateFiles = duplicates.size,
+            newImports = importIds.size,
+            duplicateFileNames = duplicates,
+            importIds = importIds
+        )
+    }
 
     /**
      * Observe work progress and update database
@@ -249,4 +314,28 @@ data class ImportStats(
     val activeCount: Int get() = pending + inProgress
     val completedSuccessfully: Int get() = completed
     val completedWithErrors: Int get() = failed + cancelled
+}
+
+/**
+ * Information about a previously imported file
+ */
+data class ImportedFileInfo(
+    val path: String,
+    val importedAt: Long,
+    val bookId: String?
+)
+
+/**
+ * Result of a batch import operation
+ */
+data class BatchImportResult(
+    val totalFiles: Int,
+    val duplicateFiles: Int,
+    val newImports: Int,
+    val duplicateFileNames: List<String>,
+    val importIds: List<String>
+) {
+    val hasNoDuplicates: Boolean get() = duplicateFiles == 0
+    val hasAllDuplicates: Boolean get() = duplicateFiles == totalFiles
+    val hasMixedResults: Boolean get() = duplicateFiles > 0 && newImports > 0
 }

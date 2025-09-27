@@ -72,14 +72,22 @@ class LibraryViewModel @Inject constructor(
         viewModelScope.launch {
             snapshotFlow { libraryManager.books.value }.collect { books ->
                 _allBooks.value = books.toList() // Create a new list to ensure state change detection
+                // Update library state to Success once books are loaded
+                _libraryState.value = UiState.Success(books.toList())
             }
         }
     }
 
     // Reading Books (currently reading)
     val readingBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = allBooks.map { books ->
-        books.filter { it.readingStatus == ReadingStatus.READING }
+        println("LibraryViewModel.readingBooks: Filtering ${books.size} books")
+        books.forEach { book ->
+            println("  Book ${book.title}: progress=${book.progress}, explicitStatus=${book.explicitReadingStatus}, readingStatus=${book.readingStatus}")
+        }
+        val reading = books.filter { it.readingStatus == ReadingStatus.READING }
              .sortedByDescending { it.lastReadTimestamp }
+        println("  Result: ${reading.size} books in READING status")
+        reading
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -130,7 +138,12 @@ class LibraryViewModel @Inject constructor(
         } else {
             searchBooks(books, query)
         }
-        if (sortAscending) filtered.reversed() else filtered
+        // Sort properly by lastReadTimestamp instead of just reversing
+        if (sortAscending) {
+            filtered.sortedBy { it.lastReadTimestamp }
+        } else {
+            filtered.sortedByDescending { it.lastReadTimestamp }
+        }
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -196,31 +209,41 @@ class LibraryViewModel @Inject constructor(
     }
 
     /**
-     * Marks a book as started reading (sets progress to a small value if it was 0)
+     * Marks a book as started reading (sets explicit reading status with 0% progress)
      */
     fun startReading(bookId: String) {
-        updateBookProgress(bookId, 0.05f) // 5%
+        // Set explicit reading status so it shows in Reading section even at 0% progress
+        libraryManager.updateBookStatus(bookId, ReadingStatus.READING)
+        libraryManager.updateBookProgressDirect(bookId, 0.0f) // Start at 0%
     }
     
     /**
-     * Moves a book back to Plan to Read status
+     * Moves a book to Plan to Read status (explicitly set by user)
      */
-    fun moveToplanToRead(bookId: String) {
-        updateBookProgress(bookId, 0f)
+    fun moveToPlanToRead(bookId: String) {
+        libraryManager.updateBookStatus(bookId, ReadingStatus.PLAN_TO_READ)
+    }
+    
+    /**
+     * Removes a book from Plan to Read (moves back to unread status)
+     */
+    fun removeFromPlanToRead(bookId: String) {
+        libraryManager.updateBookStatus(bookId, ReadingStatus.UNREAD)
     }
     
     /**
      * Sets a specific progress for a book (between 0 and 1)
      */
     fun setBookProgress(bookId: String, progress: Float) {
-        updateBookProgress(bookId, progress)
+        libraryManager.updateBookProgressDirect(bookId, progress)
     }
 
     /**
      * Marks a book as completed
      */
     fun markAsCompleted(bookId: String) {
-        updateBookProgress(bookId, 1.0f)
+        libraryManager.updateBookProgressDirect(bookId, 1.0f)
+        // No need to set explicit status - progress >= 1f will automatically make it COMPLETED
     }
 
     /**
@@ -339,7 +362,8 @@ class LibraryViewModel @Inject constructor(
      * Refreshes the book list from the repository
      */
     fun refreshBooks() {
-        // LibraryManager handles persistence, so no need to reload
+        // Force refresh of allBooks state by creating a new list
+        _allBooks.value = libraryManager.books.value.toList()
     }
 
     // Search and filtering methods

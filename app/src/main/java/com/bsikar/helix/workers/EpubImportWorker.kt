@@ -33,7 +33,8 @@ class EpubImportWorker @AssistedInject constructor(
     @Assisted private val workerParams: WorkerParameters,
     private val bookRepository: BookRepository,
     private val chapterRepository: ChapterRepository,
-    private val epubParser: EpubParser
+    private val epubParser: EpubParser,
+    private val importedFileDao: com.bsikar.helix.data.source.dao.ImportedFileDao
 ) : CoroutineWorker(context, workerParams) {
 
     companion object {
@@ -181,6 +182,16 @@ class EpubImportWorker @AssistedInject constructor(
             
             // Complete
             updateProgress(fileName, 100, "Import completed!")
+            
+            // Record the successful import in the imported files table
+            val importedFileEntity = com.bsikar.helix.data.source.entities.ImportedFileEntity(
+                path = fileUriString,
+                originalPath = fileName,
+                importedAt = System.currentTimeMillis(),
+                bookId = savedBook.id,
+                sourceType = "individual"
+            )
+            importedFileDao.insertImportedFile(importedFileEntity)
             
             ImportResult(
                 success = true,

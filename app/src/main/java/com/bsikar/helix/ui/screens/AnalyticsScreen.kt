@@ -479,7 +479,7 @@ private fun BookAnalyticsCard(
             )
 
             Text(
-                text = "${(analytics.completionPercentage * 100).toInt()}% Complete",
+                text = "${kotlin.math.round(analytics.completionPercentage * 100).toInt()}% Complete",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary
             )

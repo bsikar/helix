@@ -38,6 +38,29 @@ fun ChapterNavigationSheet(
 ) {
     val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showTableOfContents by remember { mutableStateOf(true) }
+    var searchQuery by remember { mutableStateOf("") }
+    var isSearchActive by remember { mutableStateOf(false) }
+    
+    // Filter chapters and TOC based on search query
+    val filteredChapters = remember(chapters, searchQuery) {
+        if (searchQuery.isBlank()) {
+            chapters
+        } else {
+            chapters.filter { chapter ->
+                chapter.title.contains(searchQuery, ignoreCase = true)
+            }
+        }
+    }
+    
+    val filteredTableOfContents = remember(tableOfContents, searchQuery) {
+        if (searchQuery.isBlank()) {
+            tableOfContents
+        } else {
+            tableOfContents.filter { tocEntry ->
+                tocEntry.title.contains(searchQuery, ignoreCase = true)
+            }
+        }
+    }
     
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -49,20 +72,49 @@ fun ChapterNavigationSheet(
                 .fillMaxWidth()
                 .padding(16.dp)
         ) {
-            // Header with tabs
+            // Header with title and action buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = stringResource(R.string.chapter_navigation),
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold
-                )
-                
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.Close, contentDescription = stringResource(R.string.close))
+                if (!isSearchActive) {
+                    Text(
+                        text = stringResource(R.string.chapter_navigation),
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    
+                    Row {
+                        IconButton(onClick = { isSearchActive = true }) {
+                            Icon(Icons.Default.Search, contentDescription = "Search chapters")
+                        }
+                        IconButton(onClick = onDismiss) {
+                            Icon(Icons.Default.Close, contentDescription = stringResource(R.string.close))
+                        }
+                    }
+                } else {
+                    // Search bar
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = { Text("Search chapters...") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Search, contentDescription = "Search")
+                        },
+                        trailingIcon = {
+                            IconButton(onClick = {
+                                searchQuery = ""
+                                isSearchActive = false
+                            }) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear search")
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(end = 8.dp),
+                        singleLine = true
+                    )
                 }
             }
             
@@ -108,7 +160,7 @@ fun ChapterNavigationSheet(
                                 color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                             Text(
-                                text = "${(readingProgress * 100).toInt()}%",
+                                text = "${kotlin.math.round(readingProgress * 100).toInt()}%",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer
@@ -127,19 +179,67 @@ fun ChapterNavigationSheet(
             
             // Content based on selected tab
             if (showTableOfContents && tableOfContents.isNotEmpty()) {
-                TableOfContentsView(
-                    tableOfContents = tableOfContents,
-                    currentChapter = currentChapter,
-                    onChapterSelect = onChapterSelect,
-                    modifier = Modifier.weight(1f)
-                )
+                if (filteredTableOfContents.isEmpty() && searchQuery.isNotBlank()) {
+                    // Show no results message
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "No chapters found for \"$searchQuery\"",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    TableOfContentsView(
+                        tableOfContents = filteredTableOfContents,
+                        currentChapter = currentChapter,
+                        onChapterSelect = onChapterSelect,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             } else {
-                ChapterListView(
-                    chapters = chapters,
-                    currentChapter = currentChapter,
-                    onChapterSelect = onChapterSelect,
-                    modifier = Modifier.weight(1f)
-                )
+                if (filteredChapters.isEmpty() && searchQuery.isNotBlank()) {
+                    // Show no results message
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "No chapters found for \"$searchQuery\"",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    ChapterListView(
+                        chapters = filteredChapters,
+                        currentChapter = currentChapter,
+                        onChapterSelect = onChapterSelect,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
             
             // Bottom spacing for gesture area

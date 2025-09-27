@@ -18,7 +18,7 @@ enum class ReadingMode(val displayName: String, val backgroundColor: Color, val 
     LIGHT("Light", Color(0xFFFFFFFF), Color(0xFF000000)),
     SEPIA("Sepia", Color(0xFFF7F3E9), Color(0xFF5D4E37)),
     DARK("Dark", Color(0xFF1C1C1E), Color(0xFFFFFFFF)),
-    BLACK("Black", Color(0xFF000000), Color(0xFFFFFFFF))
+    SYSTEM("System", Color(0xFFFFFFFF), Color(0xFF000000)) // Will adapt based on system theme
 }
 
 enum class TextAlignment(val displayName: String) {
@@ -36,7 +36,7 @@ data class ReaderPreset(
         fun getDefaultPresets(): List<ReaderPreset> {
             return listOf(
                 ReaderPreset(
-                    name = "Day Reading",
+                    name = "Day",
                     settings = ReaderSettings(
                         fontSize = 16,
                         lineHeight = 1.5f,
@@ -49,7 +49,7 @@ data class ReaderPreset(
                     isCustom = false
                 ),
                 ReaderPreset(
-                    name = "Night Mode",
+                    name = "Night",
                     settings = ReaderSettings(
                         fontSize = 18,
                         lineHeight = 1.6f,
@@ -58,19 +58,6 @@ data class ReaderPreset(
                         textAlign = TextAlignment.JUSTIFY,
                         marginHorizontal = 28,
                         marginVertical = 20
-                    ),
-                    isCustom = false
-                ),
-                ReaderPreset(
-                    name = "Comfort Reading",
-                    settings = ReaderSettings(
-                        fontSize = 20,
-                        lineHeight = 1.8f,
-                        brightness = 0.9f,
-                        readingMode = ReadingMode.SEPIA,
-                        textAlign = TextAlignment.JUSTIFY,
-                        marginHorizontal = 32,
-                        marginVertical = 24
                     ),
                     isCustom = false
                 )

@@ -17,6 +17,7 @@ import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.theme.ThemeMode
 import com.bsikar.helix.viewmodels.LibraryViewModel
 import com.bsikar.helix.viewmodels.ReaderViewModel
+import com.bsikar.helix.managers.ImportManager
 
 @Composable
 fun MainApp(
@@ -24,7 +25,8 @@ fun MainApp(
     onThemeChange: (ThemeMode) -> Unit,
     theme: AppTheme,
     preferencesManager: UserPreferencesManager,
-    libraryViewModel: LibraryViewModel
+    libraryViewModel: LibraryViewModel,
+    importManager: ImportManager? = null
 ) {
     var selectedTab by remember { mutableStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
@@ -41,6 +43,11 @@ fun MainApp(
     val libraryState by libraryViewModel.libraryState.collectAsState()
     val errorMessage by libraryViewModel.errorMessage.collectAsState()
     val searchQuery by libraryViewModel.searchQuery.collectAsState()
+    
+    // Collect sorting states
+    val readingSortAscending by libraryViewModel.readingSortAscending.collectAsState()
+    val planToReadSortAscending by libraryViewModel.planToReadSortAscending.collectAsState()
+    val completedSortAscending by libraryViewModel.completedSortAscending.collectAsState()
 
     // Handle global library state (for operations like imports/scans)
     when (libraryState) {
@@ -77,7 +84,8 @@ fun MainApp(
                     settingsScrollTarget = null
                 },
                 libraryManager = libraryViewModel.libraryManager,
-                scrollToSection = settingsScrollTarget
+                scrollToSection = settingsScrollTarget,
+                importManager = importManager
             )
         }
         seeAllData != null -> {
@@ -102,6 +110,8 @@ fun MainApp(
                 },
                 onUpdateReadingPosition = { bookId, currentPage, currentChapter, scrollPosition ->
                     libraryViewModel.updateReadingPosition(bookId, currentPage, currentChapter, scrollPosition)
+                    // Update the currentBook state with the latest data from the updated allBooks list
+                    currentBook = allBooks.find { it.id == bookId } ?: currentBook
                 },
                 onUpdateBookSettings = { updatedBook ->
                     libraryViewModel.updateBookSettings(updatedBook)
@@ -135,7 +145,7 @@ fun MainApp(
                     onSeeAllClick = { title, books -> seeAllData = title to books },
                     onStartReading = { bookId -> libraryViewModel.startReading(bookId) },
                     onMarkCompleted = { bookId -> libraryViewModel.markAsCompleted(bookId) },
-                    onMoveToPlanToRead = { bookId -> libraryViewModel.moveToplanToRead(bookId) },
+                    onMoveToPlanToRead = { bookId -> libraryViewModel.moveToPlanToRead(bookId) },
                     onSetProgress = { bookId, progress -> libraryViewModel.setBookProgress(bookId, progress) },
                     onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) },
                     onUpdateBookSettings = { book -> libraryViewModel.updateBookSettings(book) },
@@ -143,7 +153,14 @@ fun MainApp(
                     libraryState = libraryState,
                     errorMessage = errorMessage,
                     searchQuery = searchQuery,
-                    onSearchQueryChange = { query -> libraryViewModel.updateSearchQuery(query) }
+                    onSearchQueryChange = { query -> libraryViewModel.updateSearchQuery(query) },
+                    // Sorting parameters
+                    readingSortAscending = readingSortAscending,
+                    planToReadSortAscending = planToReadSortAscending,
+                    completedSortAscending = completedSortAscending,
+                    onToggleReadingSort = { libraryViewModel.toggleReadingSortOrder() },
+                    onTogglePlanToReadSort = { libraryViewModel.togglePlanToReadSortOrder() },
+                    onToggleCompletedSort = { libraryViewModel.toggleCompletedSortOrder() }
                 )
                 1 -> RecentsScreen(
                     selectedTab = selectedTab,
@@ -154,7 +171,7 @@ fun MainApp(
                     onBookClick = { book -> currentBook = book },
                     onStartReading = { bookId -> libraryViewModel.startReading(bookId) },
                     onMarkCompleted = { bookId -> libraryViewModel.markAsCompleted(bookId) },
-                    onMoveToPlanToRead = { bookId -> libraryViewModel.moveToplanToRead(bookId) },
+                    onMoveToPlanToRead = { bookId -> libraryViewModel.moveToPlanToRead(bookId) },
                     onSetProgress = { bookId, progress -> libraryViewModel.setBookProgress(bookId, progress) },
                     onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) }
                 )
@@ -168,10 +185,11 @@ fun MainApp(
                     allBooks = allBooks,
                     onStartReading = { bookId -> libraryViewModel.startReading(bookId) },
                     onMarkCompleted = { bookId -> libraryViewModel.markAsCompleted(bookId) },
-                    onMoveToPlanToRead = { bookId -> libraryViewModel.moveToplanToRead(bookId) },
+                    onMoveToPlanToRead = { bookId -> libraryViewModel.moveToPlanToRead(bookId) },
                     onSetProgress = { bookId, progress -> libraryViewModel.setBookProgress(bookId, progress) },
                     onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) },
-                    onUpdateBookSettings = { book -> libraryViewModel.updateBookSettings(book) }
+                    onUpdateBookSettings = { book -> libraryViewModel.updateBookSettings(book) },
+                    onRefresh = { libraryViewModel.refreshBooks() }
                 )
                 else -> LibraryScreen(
                     selectedTab = selectedTab,
@@ -194,7 +212,7 @@ fun MainApp(
                     onSeeAllClick = { title, books -> seeAllData = title to books },
                     onStartReading = { bookId -> libraryViewModel.startReading(bookId) },
                     onMarkCompleted = { bookId -> libraryViewModel.markAsCompleted(bookId) },
-                    onMoveToPlanToRead = { bookId -> libraryViewModel.moveToplanToRead(bookId) },
+                    onMoveToPlanToRead = { bookId -> libraryViewModel.moveToPlanToRead(bookId) },
                     onSetProgress = { bookId, progress -> libraryViewModel.setBookProgress(bookId, progress) },
                     onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) },
                     onUpdateBookSettings = { book -> libraryViewModel.updateBookSettings(book) },
@@ -202,7 +220,14 @@ fun MainApp(
                     libraryState = libraryState,
                     errorMessage = errorMessage,
                     searchQuery = searchQuery,
-                    onSearchQueryChange = { query -> libraryViewModel.updateSearchQuery(query) }
+                    onSearchQueryChange = { query -> libraryViewModel.updateSearchQuery(query) },
+                    // Sorting parameters
+                    readingSortAscending = readingSortAscending,
+                    planToReadSortAscending = planToReadSortAscending,
+                    completedSortAscending = completedSortAscending,
+                    onToggleReadingSort = { libraryViewModel.toggleReadingSortOrder() },
+                    onTogglePlanToReadSort = { libraryViewModel.togglePlanToReadSortOrder() },
+                    onToggleCompletedSort = { libraryViewModel.toggleCompletedSortOrder() }
                 )
             }
         }

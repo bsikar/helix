@@ -515,6 +515,7 @@ private fun getThemeColors(readingMode: ReadingMode): Pair<String, String> {
         ReadingMode.DARK -> "#121212" to "#E0E0E0"
         ReadingMode.SEPIA -> "#F4ECD8" to "#5C4B37"
         ReadingMode.BLACK -> "#000000" to "#FFFFFF"
+        ReadingMode.SYSTEM -> "#FFFFFF" to "#000000" // Default to light, will adapt with system theme detection
         ReadingMode.HIGH_CONTRAST_LIGHT -> "#FFFFFF" to "#000000"
         ReadingMode.HIGH_CONTRAST_DARK -> "#000000" to "#FFFFFF"
         ReadingMode.HIGH_CONTRAST_YELLOW -> "#FFFF00" to "#000000"
@@ -531,28 +532,28 @@ private fun getTextAlignment(textAlign: TextAlignment): String {
 
 private fun getBlockquoteBackground(readingMode: ReadingMode): String {
     return when (readingMode) {
-        ReadingMode.DARK, ReadingMode.BLACK -> "#1E1E1E"
+        ReadingMode.DARK -> "#1E1E1E"
         else -> "#F8F9FA"
     }
 }
 
 private fun getCodeBackground(readingMode: ReadingMode): String {
     return when (readingMode) {
-        ReadingMode.DARK, ReadingMode.BLACK -> "#2D2D2D"
+        ReadingMode.DARK -> "#2D2D2D"
         else -> "#F5F5F5"
     }
 }
 
 private fun getBorderColor(readingMode: ReadingMode): String {
     return when (readingMode) {
-        ReadingMode.DARK, ReadingMode.BLACK -> "#444"
+        ReadingMode.DARK -> "#444"
         else -> "#DDD"
     }
 }
 
 private fun getTableHeaderBackground(readingMode: ReadingMode): String {
     return when (readingMode) {
-        ReadingMode.DARK, ReadingMode.BLACK -> "#333"
+        ReadingMode.DARK -> "#333"
         else -> "#F5F5F5"
     }
 }
