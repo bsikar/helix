@@ -98,6 +98,8 @@ class ReaderViewModel @Inject constructor(
     
     private val _readingSessionStartTime = MutableStateFlow<Long?>(null)
     private val _lastScrollPosition = MutableStateFlow(0)
+    val lastScrollPosition: StateFlow<Int> = _lastScrollPosition.asStateFlow()
+    
     private val _lastScrollItemIndex = MutableStateFlow(0)
     private val _lastScrollItemOffset = MutableStateFlow(0)
     private val _currentPageNumber = MutableStateFlow(1)
@@ -409,18 +411,6 @@ class ReaderViewModel @Inject constructor(
         epubCache.clear()
     }
     
-    /**
-     * Navigate to a bookmarked position
-     */
-    fun navigateToBookmark(bookmark: com.bsikar.helix.data.model.Bookmark, context: Context? = null) {
-        // Convert chapter number (1-based) to chapter index (0-based)
-        val targetChapterIndex = (bookmark.chapterNumber - 1).coerceAtLeast(0)
-        navigateToChapter(targetChapterIndex, context)
-        
-        // Update the page number and scroll position from bookmark
-        _currentPageNumber.value = bookmark.pageNumber
-        _lastScrollPosition.value = bookmark.scrollPosition
-    }
     
     /**
      * Get cache statistics for debugging

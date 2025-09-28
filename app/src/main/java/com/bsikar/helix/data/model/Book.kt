@@ -120,11 +120,11 @@ data class Book(
     }
     val readingStatus: ReadingStatus
         get() = when {
-            // If progress indicates reading or completed, use progress-based logic
+            // First check explicit status if set by user
+            explicitReadingStatus != null -> explicitReadingStatus!!
+            // Fall back to progress-based logic only if no explicit status
             progress >= 1f -> ReadingStatus.COMPLETED
             progress > 0f -> ReadingStatus.READING
-            // For 0 progress, use explicit status or default to UNREAD
-            explicitReadingStatus != null -> explicitReadingStatus!!
             else -> ReadingStatus.UNREAD
         }
 

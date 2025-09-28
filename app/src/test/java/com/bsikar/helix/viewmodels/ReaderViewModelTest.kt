@@ -85,7 +85,8 @@ class ReaderViewModelTest {
             preferencesManager,
             readingProgressRepository,
             chapterRepository,
-            analyticsRepository
+            analyticsRepository,
+            mockContext
         )
     }
 

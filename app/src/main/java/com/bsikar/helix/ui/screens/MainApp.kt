@@ -160,7 +160,8 @@ fun MainApp(
                     completedSortAscending = completedSortAscending,
                     onToggleReadingSort = { libraryViewModel.toggleReadingSortOrder() },
                     onTogglePlanToReadSort = { libraryViewModel.togglePlanToReadSortOrder() },
-                    onToggleCompletedSort = { libraryViewModel.toggleCompletedSortOrder() }
+                    onToggleCompletedSort = { libraryViewModel.toggleCompletedSortOrder() },
+                    onRefresh = { libraryViewModel.refreshBooks() }
                 )
                 1 -> RecentsScreen(
                     selectedTab = selectedTab,
@@ -173,7 +174,8 @@ fun MainApp(
                     onMarkCompleted = { bookId -> libraryViewModel.markAsCompleted(bookId) },
                     onMoveToPlanToRead = { bookId -> libraryViewModel.moveToPlanToRead(bookId) },
                     onSetProgress = { bookId, progress -> libraryViewModel.setBookProgress(bookId, progress) },
-                    onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) }
+                    onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) },
+                    onRefresh = { libraryViewModel.refreshBooks() }
                 )
                 2 -> BrowseScreen(
                     selectedTab = selectedTab,

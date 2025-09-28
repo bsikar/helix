@@ -48,9 +48,7 @@ import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.theme.ThemeManager
 import com.bsikar.helix.theme.ThemeMode
 import com.bsikar.helix.ui.components.SearchUtils
-import com.bsikar.helix.ui.components.BookmarkDialog
 import com.bsikar.helix.ui.components.ChapterNavigationSheet
-import com.bsikar.helix.data.model.Bookmark
 import com.bsikar.helix.data.LibraryManager
 import com.bsikar.helix.data.model.ParsedEpub
 import com.bsikar.helix.data.EpubParser
@@ -87,7 +85,6 @@ fun ReaderScreen(
     var currentPage by remember { mutableIntStateOf(book.currentPage) }
     var showSettings by remember { mutableStateOf(false) }
     var showChapterDialog by remember { mutableStateOf(false) }
-    var showBookmarkDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     
@@ -114,15 +111,118 @@ fun ReaderScreen(
     // Track if we've already restored scroll position for this book
     var hasRestoredScrollPosition by remember { mutableStateOf(false) }
     
-    // Track scroll position changes with direct values
+    // Debug when hasRestoredScrollPosition changes
+    LaunchedEffect(hasRestoredScrollPosition) {
+        android.util.Log.d("ReaderProgress", "hasRestoredScrollPosition changed to: $hasRestoredScrollPosition")
+    }
+    
+    // Calculate real-time progress using derivedStateOf for immediate updates
+    val currentScrollProgress by remember {
+        derivedStateOf {
+            android.util.Log.d("ReaderProgress", "derivedStateOf TRIGGERED - Starting calculation")
+            android.util.Log.d("ReaderProgress", "Book: ${book.id}, isImported: ${book.isImported}")
+            android.util.Log.d("ReaderProgress", "ParsedEpub: ${parsedEpub != null}, chapters: ${parsedEpub?.chapters?.size}")
+            android.util.Log.d("ReaderProgress", "CurrentContent size: ${currentContent.size}")
+            android.util.Log.d("ReaderProgress", "HasRestoredScrollPosition: $hasRestoredScrollPosition")
+            android.util.Log.d("ReaderProgress", "LazyListState - firstVisibleItemIndex: ${lazyListState.firstVisibleItemIndex}")
+            android.util.Log.d("ReaderProgress", "LazyListState - firstVisibleItemScrollOffset: ${lazyListState.firstVisibleItemScrollOffset}")
+            
+            val progress = if (book.isImported && parsedEpub != null && currentContent.isNotEmpty() && hasRestoredScrollPosition) {
+                android.util.Log.d("ReaderProgress", "Conditions met - calculating progress")
+                val totalChapters = parsedEpub!!.chapters.size
+                if (totalChapters > 0) {
+                    val chapterProgress = currentChapterIndex.toFloat() / totalChapters.toFloat()
+                    
+                    // Calculate progress within current chapter based on scroll position and layoutInfo
+                    val layoutInfo = lazyListState.layoutInfo
+                    val itemProgress = if (layoutInfo.totalItemsCount > 0) {
+                        val visibleItemInfo = layoutInfo.visibleItemsInfo.firstOrNull()
+                        if (visibleItemInfo != null) {
+                            // Calculate the scroll progress through the chapter
+                            // Using the item height and scroll offset for more accurate progress
+                            val itemHeight = visibleItemInfo.size
+                            val totalScrollableHeight = itemHeight - layoutInfo.viewportSize.height
+                            
+                            if (totalScrollableHeight > 0) {
+                                // Calculate how far we've scrolled through this item
+                                val scrollProgress = (-visibleItemInfo.offset).toFloat() / totalScrollableHeight.toFloat()
+                                // This is progress through the chapter, scale it relative to total chapters
+                                val chapterContribution = scrollProgress.coerceIn(0f, 1f) / totalChapters.toFloat()
+                                
+                                android.util.Log.d("ReaderProgress", "SCROLL CALC: itemHeight=$itemHeight, viewport=${layoutInfo.viewportSize.height}, scrollable=$totalScrollableHeight")
+                                android.util.Log.d("ReaderProgress", "SCROLL CALC: offset=${visibleItemInfo.offset}, scrollProgress=$scrollProgress, contribution=$chapterContribution")
+                                
+                                chapterContribution
+                            } else {
+                                // Item fits entirely in viewport, no scroll progress
+                                0f
+                            }
+                        } else {
+                            0f
+                        }
+                    } else 0f
+                    
+                    val newProgress = (chapterProgress + itemProgress).coerceIn(0f, 1f)
+                    
+                    android.util.Log.d("ReaderProgress", "CALCULATED: Chapter: $currentChapterIndex/$totalChapters ($chapterProgress), IntraChapter: $itemProgress, TOTAL: $newProgress")
+                    
+                    newProgress
+                } else {
+                    android.util.Log.d("ReaderProgress", "No chapters found, using book progress: ${book.progress}")
+                    book.progress
+                }
+            } else {
+                android.util.Log.d("ReaderProgress", "Conditions NOT met, using book progress: ${book.progress}")
+                book.progress
+            }
+            android.util.Log.d("ReaderProgress", "derivedStateOf RESULT: $progress")
+            progress
+        }
+    }
+    
+    // Track scroll position changes (keep existing functionality)
     LaunchedEffect(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset, hasRestoredScrollPosition) {
+        val currentItem = lazyListState.firstVisibleItemIndex
+        val itemOffset = lazyListState.firstVisibleItemScrollOffset
+        
+        android.util.Log.d("ReaderScroll", "LaunchedEffect TRIGGERED - item: $currentItem, offset: $itemOffset, hasRestored: $hasRestoredScrollPosition")
+        
         // Only track scroll changes after we've restored the initial position
         if (hasRestoredScrollPosition) {
-            val currentItem = lazyListState.firstVisibleItemIndex
-            val itemOffset = lazyListState.firstVisibleItemScrollOffset
-            
-            android.util.Log.d("ReaderScreen", "Saving scroll: item=$currentItem, offset=$itemOffset")
+            android.util.Log.d("ReaderScroll", "Saving scroll: item=$currentItem, offset=$itemOffset")
             readerViewModel.updateScrollPosition(currentItem, itemOffset)
+        } else {
+            android.util.Log.d("ReaderScroll", "NOT saving scroll - position not restored yet")
+        }
+    }
+    
+    // Update book progress in library when currentScrollProgress changes (debounced)
+    LaunchedEffect(currentScrollProgress) {
+        android.util.Log.d("ReaderProgressUpdate", "LaunchedEffect triggered with progress: $currentScrollProgress")
+        android.util.Log.d("ReaderProgressUpdate", "hasRestored: $hasRestoredScrollPosition, isImported: ${book.isImported}")
+        
+        if (hasRestoredScrollPosition && book.isImported) {
+            android.util.Log.d("ReaderProgressUpdate", "Conditions met - will update after delay")
+            // Add a small delay to debounce frequent updates
+            kotlinx.coroutines.delay(200)
+            
+            // Calculate current page for chapter-based navigation
+            val newCurrentPage = currentChapterIndex + 1
+            val scrollPosition = try {
+                lazyListState.firstVisibleItemIndex * 1000 + lazyListState.firstVisibleItemScrollOffset
+            } catch (e: Exception) {
+                0
+            }
+            
+            // Update reading position with the new progress
+            onUpdateReadingPosition(book.id, newCurrentPage, currentChapterIndex + 1, scrollPosition)
+            
+            // Also directly update the book's progress for real-time updates in library/recents
+            libraryManager.updateBookProgressDirect(book.id, currentScrollProgress)
+            
+            android.util.Log.d("ReaderProgressUpdate", "UPDATED book progress to: $currentScrollProgress (scroll pos: $scrollPosition)")
+        } else {
+            android.util.Log.d("ReaderProgressUpdate", "Conditions NOT met - skipping update")
         }
     }
     
@@ -206,13 +306,6 @@ fun ReaderScreen(
         }
     }
     
-    // Get bookmarks for this book using reactive Flow
-    val bookmarks by preferencesManager.getBookmarksFlow(book.id).collectAsState(initial = emptyList())
-    val isCurrentPageBookmarked by remember { 
-        derivedStateOf { 
-            bookmarks.any { it.bookId == book.id && it.chapterNumber == currentChapterIndex && it.pageNumber == currentPage }
-        } 
-    }
     
     // Use persistent reader settings from UserPreferencesManager
     val userPreferences by preferencesManager.preferences
@@ -333,58 +426,6 @@ fun ReaderScreen(
                     }
                 },
                 actions = {
-                    // Single bookmark icon with smart behavior
-                    Box(
-                        modifier = Modifier.combinedClickable(
-                            onClick = { 
-                                // Short press: toggle bookmark (add if not bookmarked, remove if bookmarked)
-                                if (isCurrentPageBookmarked) {
-                                    // Remove the existing bookmark for this page
-                                    val existingBookmark = bookmarks.find { 
-                                        it.bookId == book.id && it.chapterNumber == currentChapterIndex && it.pageNumber == currentPage 
-                                    }
-                                    existingBookmark?.let { bookmark ->
-                                        preferencesManager.removeBookmark(bookmark.id)
-                                    }
-                                } else {
-                                    // Add a new bookmark
-                                    val currentScrollPosition = lazyListState.firstVisibleItemIndex * 1000 + lazyListState.firstVisibleItemScrollOffset
-                                    val newBookmark = Bookmark(
-                                        bookId = book.id,
-                                        bookTitle = book.title,
-                                        chapterNumber = currentChapterIndex,
-                                        pageNumber = currentPage,
-                                        scrollPosition = currentScrollPosition
-                                    )
-                                    preferencesManager.addBookmark(newBookmark)
-                                }
-                            },
-                            onLongClick = {
-                                // Long press: always show bookmark management dialog
-                                showBookmarkDialog = true
-                            }
-                        )
-                        .size(48.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                            Icon(
-                                if (isCurrentPageBookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
-                                contentDescription = if (isCurrentPageBookmarked) "Remove bookmark" else "Add bookmark",
-                                tint = if (isCurrentPageBookmarked) theme.accentColor else theme.secondaryTextColor
-                            )
-                            // Show badge if there are multiple bookmarks
-                            if (bookmarks.size > 1) {
-                                Badge(
-                                    modifier = Modifier.align(Alignment.TopEnd)
-                                ) {
-                                    Text(
-                                        text = bookmarks.size.toString(),
-                                        fontSize = 10.sp,
-                                        color = androidx.compose.ui.graphics.Color.White
-                                    )
-                                }
-                            }
-                    }
                     IconButton(onClick = { showSettings = true }) {
                         Icon(
                             Icons.Filled.Settings,
@@ -407,7 +448,7 @@ fun ReaderScreen(
                 } else {
                     totalPages
                 },
-                progress = book.progress, // Use the book's stored progress
+                progress = currentScrollProgress, // Use calculated real-time progress
                 onPreviousPage = { 
                     if (book.isImported && parsedEpub != null) {
                         // Chapter-based navigation for EPUBs
@@ -438,7 +479,13 @@ fun ReaderScreen(
         ) {
             // Progress indicator
             LinearProgressIndicator(
-                progress = { book.progress }, // Use the book's stored progress
+                progress = { 
+                    android.util.Log.d("ReaderProgressBar", "========== PROGRESS BAR CALLED ==========")
+                    android.util.Log.d("ReaderProgressBar", "Progress bar showing: $currentScrollProgress")
+                    android.util.Log.d("ReaderProgressBar", "Book progress: ${book.progress}")
+                    android.util.Log.d("ReaderProgressBar", "==========================================")
+                    currentScrollProgress 
+                }, // Use calculated real-time progress
                 modifier = Modifier.fillMaxWidth(),
                 color = theme.accentColor,
                 trackColor = theme.secondaryTextColor.copy(alpha = 0.2f)
@@ -504,6 +551,7 @@ fun ReaderScreen(
                 
                 // Only show LazyColumn if we have content and it's stable
                 if (stableContent.isNotEmpty()) {
+                    android.util.Log.d("ReaderContent", "Rendering LazyColumn with ${stableContent.size} items")
                     LazyColumn(
                         state = lazyListState,
                         modifier = Modifier.fillMaxSize(),
@@ -609,50 +657,6 @@ fun ReaderScreen(
         )
     }
     
-    // Bookmark management dialog
-    if (showBookmarkDialog) {
-        BookmarkDialog(
-            bookmarks = bookmarks,
-            onDismiss = { showBookmarkDialog = false },
-            onBookmarkClick = { bookmark ->
-                // Navigate to bookmarked location using ReaderViewModel
-                readerViewModel.navigateToBookmark(bookmark, context)
-                currentPage = bookmark.pageNumber
-                // Restore scroll position from bookmark
-                scope.launch {
-                    try {
-                        val targetItem = bookmark.scrollPosition / 1000
-                        val targetOffset = bookmark.scrollPosition % 1000
-                        lazyListState.scrollToItem(targetItem, targetOffset)
-                    } catch (e: Exception) {
-                        // If scroll position restoration fails, just go to top of page
-                        lazyListState.scrollToItem(0, 0)
-                    }
-                }
-                showBookmarkDialog = false
-            },
-            onBookmarkDelete = { bookmarkId ->
-                preferencesManager.removeBookmark(bookmarkId)
-            },
-            onBookmarkEditNote = { bookmarkId, note ->
-                preferencesManager.updateBookmarkNote(bookmarkId, note)
-            },
-            theme = theme,
-            currentChapter = currentChapterIndex,
-            currentPage = currentPage,
-            onQuickBookmark = {
-                val newBookmark = Bookmark(
-                    bookId = book.id,
-                    bookTitle = book.title,
-                    chapterNumber = currentChapterIndex,
-                    pageNumber = currentPage,
-                    scrollPosition = lazyListState.firstVisibleItemIndex * 1000 + lazyListState.firstVisibleItemScrollOffset
-                )
-                preferencesManager.addBookmark(newBookmark)
-            }
-        )
-    }
-    
 }
 
 @Composable
@@ -702,7 +706,7 @@ fun ReaderBottomBar(
                     fontWeight = FontWeight.Medium
                 )
                 Text(
-                    text = "${kotlin.math.round(progress * 100).toInt()}% complete",
+                    text = "${String.format("%.2f", progress * 100)}% complete",
                     fontSize = 12.sp,
                     color = theme.secondaryTextColor
                 )

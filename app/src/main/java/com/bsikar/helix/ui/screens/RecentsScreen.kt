@@ -12,11 +12,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 import java.io.File
@@ -49,10 +52,13 @@ fun RecentsScreen(
     onMarkCompleted: (String) -> Unit = {},
     onMoveToPlanToRead: (String) -> Unit = {},
     onSetProgress: (String, Float) -> Unit = { _, _ -> },
-    onEditTags: (String, List<String>) -> Unit = { _, _ -> }
+    onEditTags: (String, List<String>) -> Unit = { _, _ -> },
+    onRefresh: () -> Unit = {}
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var sortBy by remember { mutableStateOf("Recent") }
+    var isRefreshing by remember { mutableStateOf(false) }
+    val pullToRefreshState = rememberPullToRefreshState()
     
     // Filter and sort recent books
     val filteredRecentBooks = remember(searchQuery, sortBy, recentBooks) {
@@ -172,11 +178,21 @@ fun RecentsScreen(
             }
         }
     ) { innerPadding ->
-        LazyColumn(
+        PullToRefreshBox(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            isRefreshing = isRefreshing,
+            onRefresh = { 
+                isRefreshing = true
+                onRefresh()
+                isRefreshing = false
+            },
+            state = pullToRefreshState
         ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = innerPadding,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
             // Search Bar
             item {
                 SearchBar(
@@ -221,6 +237,7 @@ fun RecentsScreen(
                         color = theme.secondaryTextColor
                     )
                 }
+            }
             }
         }
     }
@@ -383,7 +400,7 @@ fun RecentBookItem(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "${kotlin.math.round(book.progress * 100).toInt()}%",
+                            text = "${String.format("%.2f", book.progress * 100)}%",
                             fontSize = 12.sp,
                             color = theme.accentColor,
                             fontWeight = FontWeight.Medium
@@ -392,12 +409,26 @@ fun RecentBookItem(
                     
                     Spacer(modifier = Modifier.height(4.dp))
                     
-                    LinearProgressIndicator(
-                        progress = { book.progress },
-                        modifier = Modifier.fillMaxWidth(),
-                        color = theme.accentColor,
-                        trackColor = theme.secondaryTextColor.copy(alpha = 0.2f)
-                    )
+                    // Custom progress bar using Box to avoid LinearProgressIndicator artifacts
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(4.dp)
+                            .background(
+                                color = theme.secondaryTextColor.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(2.dp)
+                            )
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(book.progress.coerceIn(0f, 1f))
+                                .fillMaxHeight()
+                                .background(
+                                    color = theme.accentColor,
+                                    shape = RoundedCornerShape(2.dp)
+                                )
+                        )
+                    }
                 }
             }
             

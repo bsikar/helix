@@ -9,6 +9,7 @@ import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,11 +73,13 @@ fun LibraryScreen(
     completedSortAscending: Boolean = true,
     onToggleReadingSort: () -> Unit = {},
     onTogglePlanToReadSort: () -> Unit = {},
-    onToggleCompletedSort: () -> Unit = {}
+    onToggleCompletedSort: () -> Unit = {},
+    onRefresh: () -> Unit = {}
 ) {
     // Search query now comes from ViewModel instead of local state
     val scope = rememberCoroutineScope()
     var isRefreshing by remember { mutableStateOf(false) }
+    val pullToRefreshState = rememberPullToRefreshState()
     
     // Import progress state
     val importProgress by importManager?.importProgress?.collectAsState(initial = emptyList()) ?: remember { mutableStateOf(emptyList()) }
@@ -191,9 +194,9 @@ fun LibraryScreen(
             }
         }
     }
-    val onRefresh = {
+    val handleRefresh = {
         isRefreshing = true
-        // Simple refresh without scanning - just update the UI state
+        onRefresh() // Call the provided refresh function
         scope.launch {
             kotlinx.coroutines.delay(500) // Brief delay for visual feedback
             isRefreshing = false
@@ -354,7 +357,7 @@ fun LibraryScreen(
                             textAlign = TextAlign.Center
                         )
                         Button(
-                            onClick = { onRefresh() },
+                            onClick = { handleRefresh() },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = theme.accentColor
                             )
@@ -371,7 +374,8 @@ fun LibraryScreen(
                 PullToRefreshBox(
                     modifier = Modifier.fillMaxSize(),
                     isRefreshing = isRefreshing,
-                    onRefresh = { onRefresh() }
+                    onRefresh = { handleRefresh() },
+                    state = pullToRefreshState
                 ) {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),

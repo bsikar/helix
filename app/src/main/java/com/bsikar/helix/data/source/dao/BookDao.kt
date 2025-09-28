@@ -16,13 +16,29 @@ interface BookDao {
     @Query("SELECT * FROM books WHERE id = :id")
     suspend fun getBookById(id: String): BookEntity?
     
-    @Query("SELECT * FROM books WHERE progress > 0 AND progress < 1 ORDER BY lastReadTimestamp DESC")
+    @Query("""
+        SELECT * FROM books 
+        WHERE (explicitReadingStatus = 'READING') 
+           OR (explicitReadingStatus IS NULL AND progress > 0 AND progress < 1)
+        ORDER BY lastReadTimestamp DESC
+    """)
     fun getReadingBooksFlow(): Flow<List<BookEntity>>
     
-    @Query("SELECT * FROM books WHERE progress = 0 ORDER BY title ASC")
+    @Query("""
+        SELECT * FROM books 
+        WHERE (explicitReadingStatus = 'PLAN_TO_READ') 
+           OR (explicitReadingStatus = 'UNREAD')
+           OR (explicitReadingStatus IS NULL AND progress = 0)
+        ORDER BY title ASC
+    """)
     fun getPlanToReadBooksFlow(): Flow<List<BookEntity>>
     
-    @Query("SELECT * FROM books WHERE progress >= 1 ORDER BY title ASC")
+    @Query("""
+        SELECT * FROM books 
+        WHERE (explicitReadingStatus = 'COMPLETED') 
+           OR (explicitReadingStatus IS NULL AND progress >= 1)
+        ORDER BY title ASC
+    """)
     fun getCompletedBooksFlow(): Flow<List<BookEntity>>
     
     @Query("SELECT * FROM books WHERE lastReadTimestamp > 0 ORDER BY lastReadTimestamp DESC")

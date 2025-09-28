@@ -74,6 +74,9 @@ class LibraryManager(
     private val _books = mutableStateOf<List<com.bsikar.helix.data.model.Book>>(emptyList())
     val books: State<List<com.bsikar.helix.data.model.Book>> = _books
     
+    // Expose books as a Flow for better integration with ViewModels
+    fun getBooksFlow() = bookRepository.getAllBooksFlow()
+    
     private val _isLoading = mutableStateOf(false)
     val isLoading: State<Boolean> = _isLoading
     
@@ -106,6 +109,10 @@ class LibraryManager(
         scope.launch {
             bookRepository.getAllBooksFlow().collect { bookList ->
                 if (!suppressDatabaseFlow) {
+                    Log.d("LibraryManager", "Database flow update: ${bookList.size} books loaded from database")
+                    bookList.forEach { book ->
+                        Log.d("LibraryManager", "  - ${book.title} (status: ${book.explicitReadingStatus}, progress: ${book.progress})")
+                    }
                     _books.value = bookList
                 }
             }
@@ -116,7 +123,13 @@ class LibraryManager(
     private fun loadLibrary() {
         scope.launch {
             try {
-                // Books are now loaded from Room database via bookRepository
+                // Force load books from database on startup
+                val allBooks = bookRepository.getAllBooks()
+                Log.d("LibraryManager", "LoadLibrary: Loading ${allBooks.size} books from database")
+                allBooks.forEach { book ->
+                    Log.d("LibraryManager", "  Loaded: ${book.title} (status: ${book.explicitReadingStatus}, progress: ${book.progress})")
+                }
+                _books.value = allBooks
                 
                 // Load watched directories from Room database
                 val watchedDirEntities = watchedDirectoryDao.getAllWatchedDirectories()
@@ -631,6 +644,11 @@ class LibraryManager(
             ))
             _importedFiles.value = updatedImportedFiles
             
+            // Force refresh books from database to ensure the new book is loaded
+            val allBooks = bookRepository.getAllBooks()
+            _books.value = allBooks
+            Log.d("LibraryManager", "After single import, database has ${allBooks.size} books")
+            
             saveLibrary()
             
             Result.success(book)
@@ -871,11 +889,15 @@ class LibraryManager(
             
             // Log final results
             Log.d("LibraryManager", "Import completed: $importedCount imported, $skippedCount skipped, $failedCount failed")
-            Log.d("LibraryManager", "Library now has ${_books.value.size} books total")
             
-            // Save the library to persist the imported books
+            // Force refresh books from database to ensure all imported books are loaded
+            val allBooksAfterImport = bookRepository.getAllBooks()
+            Log.d("LibraryManager", "After import, database has ${allBooksAfterImport.size} books total")
+            _books.value = allBooksAfterImport
+            
+            // Save the library metadata (watched directories, imported files)
             saveLibrary()
-            Log.d("LibraryManager", "Library saved to preferences")
+            Log.d("LibraryManager", "Library metadata saved")
             
             _importProgress.value = null
             Result.success(importedCount)
@@ -956,25 +978,44 @@ class LibraryManager(
         return colors[colorIndex].value.toLong()
     }
     
+    
     fun updateBookProgress(bookId: String, chapterNumber: Int, pageNumber: Int, scrollPosition: Int) {
         val updatedBooks = _books.value.map { book ->
             if (book.id == bookId) {
                 val totalPages = book.totalPages
                 val currentPage = pageNumber
                 
-                // Calculate new progress based on book type
+                // Calculate new progress based on book type with granular scroll position
                 val calculatedProgress = if (book.isImported) {
-                    // For EPUB books, calculate progress based on chapters
+                    // For EPUB books, calculate granular progress including scroll position within chapter
                     val totalChapters = book.totalChapters
                     if (totalChapters > 0) {
-                        chapterNumber.toFloat() / totalChapters
+                        // Base progress from completed chapters (chapters before current)
+                        val completedChaptersProgress = (chapterNumber - 1).coerceAtLeast(0).toFloat() / totalChapters
+                        
+                        // Progress within current chapter based on scroll position
+                        // Use scroll position to estimate progress within chapter (0-100% of chapter)
+                        val scrollRatio = (scrollPosition.coerceAtLeast(0).toFloat() / 5000f).coerceAtMost(1f)
+                        
+                        // Add current chapter progress (weighted by 1/totalChapters)
+                        val currentChapterWeight = 1f / totalChapters
+                        val totalProgress = completedChaptersProgress + (scrollRatio * currentChapterWeight)
+                        
+                        // Round to 2 decimal places and ensure within bounds
+                        (kotlin.math.round(totalProgress * 10000f) / 10000f).coerceIn(0f, 1f)
                     } else {
                         // Fallback to page-based calculation if chapters not available
-                        if (totalPages > 0) currentPage.toFloat() / totalPages else 0f
+                        if (totalPages > 0) {
+                            val pageProgress = currentPage.toFloat() / totalPages
+                            (kotlin.math.round(pageProgress * 10000f) / 10000f).coerceIn(0f, 1f)
+                        } else 0f
                     }
                 } else {
-                    // For regular books (PDFs, etc.), use page-based calculation
-                    if (totalPages > 0) currentPage.toFloat() / totalPages else 0f
+                    // For regular books (PDFs, etc.), use page-based calculation with 2 decimal precision
+                    if (totalPages > 0) {
+                        val pageProgress = currentPage.toFloat() / totalPages
+                        (kotlin.math.round(pageProgress * 10000f) / 10000f).coerceIn(0f, 1f)
+                    } else 0f
                 }
                 
                 // Smart progress logic:
@@ -996,13 +1037,24 @@ class LibraryManager(
                     }
                 }
                 
+                // Auto-update reading status when starting to read
+                val newStatus = when {
+                    // If book is UNREAD or PLAN_TO_READ and we're updating progress, mark as READING
+                    (book.explicitReadingStatus == ReadingStatus.UNREAD || 
+                     book.explicitReadingStatus == ReadingStatus.PLAN_TO_READ) -> ReadingStatus.READING
+                    // If progress is complete and not already marked as COMPLETED, mark as COMPLETED
+                    newProgress >= 1.0f && book.explicitReadingStatus != ReadingStatus.COMPLETED -> ReadingStatus.COMPLETED
+                    // Otherwise keep the current status
+                    else -> book.explicitReadingStatus
+                }
+                
                 book.copy(
                     currentChapter = chapterNumber,
                     currentPage = currentPage,
                     scrollPosition = scrollPosition,
                     progress = newProgress.coerceIn(0f, 1f),
-                    lastReadTimestamp = System.currentTimeMillis()
-                    // Preserve explicitReadingStatus - don't modify it here
+                    lastReadTimestamp = System.currentTimeMillis(),
+                    explicitReadingStatus = newStatus
                 )
             } else {
                 book
@@ -1010,7 +1062,15 @@ class LibraryManager(
         }
         
         _books.value = updatedBooks
-        scope.launch { saveLibrary() }
+        
+        // Also update the database directly
+        scope.launch { 
+            val updatedBook = updatedBooks.find { it.id == bookId }
+            if (updatedBook != null) {
+                bookRepository.updateBook(updatedBook)
+            }
+            saveLibrary() 
+        }
     }
     
     /**
@@ -1026,7 +1086,15 @@ class LibraryManager(
         }
         
         _books.value = updatedBooks
-        scope.launch { saveLibrary() }
+        
+        // Update the book in the database
+        scope.launch { 
+            val updatedBook = updatedBooks.find { it.id == bookId }
+            if (updatedBook != null) {
+                bookRepository.updateBook(updatedBook)
+                Log.d("LibraryManager", "Updated book status in database: ${updatedBook.title} -> $status")
+            }
+        }
     }
     
     /**
@@ -1036,9 +1104,17 @@ class LibraryManager(
     fun updateBookProgressDirect(bookId: String, progress: Float) {
         val updatedBooks = _books.value.map { book ->
             if (book.id == bookId) {
+                // Update explicit status if needed based on progress
+                val newStatus = when {
+                    progress >= 1f && book.explicitReadingStatus != ReadingStatus.COMPLETED -> ReadingStatus.COMPLETED
+                    progress > 0f && progress < 1f && book.explicitReadingStatus == ReadingStatus.UNREAD -> ReadingStatus.READING
+                    else -> book.explicitReadingStatus
+                }
+                
                 book.copy(
                     progress = progress.coerceIn(0f, 1f),
-                    lastReadTimestamp = System.currentTimeMillis()
+                    lastReadTimestamp = System.currentTimeMillis(),
+                    explicitReadingStatus = newStatus
                 )
             } else {
                 book
@@ -1046,7 +1122,15 @@ class LibraryManager(
         }
         
         _books.value = updatedBooks
-        scope.launch { saveLibrary() }
+        
+        // Update the book in the database
+        scope.launch { 
+            val updatedBook = updatedBooks.find { it.id == bookId }
+            if (updatedBook != null) {
+                bookRepository.updateBook(updatedBook)
+                Log.d("LibraryManager", "Updated book progress in database: ${updatedBook.title} -> ${updatedBook.progress}")
+            }
+        }
     }
     
     fun updateBookTags(bookId: String, tags: List<String>) {

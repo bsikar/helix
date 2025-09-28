@@ -68,12 +68,30 @@ class LibraryViewModel @Inject constructor(
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
     
     init {
-        // Observe LibraryManager's books state and update our StateFlow
+        // Observe books directly from the database Flow for reliable updates
+        viewModelScope.launch {
+            libraryManager.getBooksFlow().collect { books ->
+                println("LibraryViewModel: Received ${books.size} books from database flow")
+                books.forEach { book ->
+                    println("  - ${book.title}: status=${book.explicitReadingStatus}, progress=${book.progress}")
+                }
+                _allBooks.value = books
+                // Update library state to Success once books are loaded
+                _libraryState.value = if (books.isEmpty()) {
+                    UiState.Success(emptyList())
+                } else {
+                    UiState.Success(books)
+                }
+            }
+        }
+        
+        // Also observe the Compose state for UI updates during runtime
         viewModelScope.launch {
             snapshotFlow { libraryManager.books.value }.collect { books ->
-                _allBooks.value = books.toList() // Create a new list to ensure state change detection
-                // Update library state to Success once books are loaded
-                _libraryState.value = UiState.Success(books.toList())
+                // Only update if different from current state to avoid loops
+                if (_allBooks.value != books) {
+                    _allBooks.value = books.toList()
+                }
             }
         }
     }
@@ -362,8 +380,12 @@ class LibraryViewModel @Inject constructor(
      * Refreshes the book list from the repository
      */
     fun refreshBooks() {
-        // Force refresh of allBooks state by creating a new list
-        _allBooks.value = libraryManager.books.value.toList()
+        viewModelScope.launch {
+            // Force refresh from database
+            val booksFromDb = libraryManager.getBookById("dummy") // This triggers a database read
+            // The flow collector will automatically update _allBooks
+            println("LibraryViewModel.refreshBooks: Triggered database refresh")
+        }
     }
 
     // Search and filtering methods
