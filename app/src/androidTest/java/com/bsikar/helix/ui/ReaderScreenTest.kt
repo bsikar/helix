@@ -72,20 +72,7 @@ class ReaderScreenTest {
         composeTestRule.onNodeWithContentDescription("Decrease font size").performClick()
     }
 
-    @Test
-    fun bookmarkFunctionality_addsAndRemovesBookmarks() {
-        // Test adding bookmark
-        composeTestRule.onNodeWithContentDescription("Add bookmark").performClick()
-        
-        // Verify bookmark was added
-        composeTestRule.onNodeWithContentDescription("Remove bookmark").assertIsDisplayed()
-        
-        // Test removing bookmark
-        composeTestRule.onNodeWithContentDescription("Remove bookmark").performClick()
-        
-        // Verify bookmark was removed
-        composeTestRule.onNodeWithContentDescription("Add bookmark").assertIsDisplayed()
-    }
+    // Bookmark functionality has been removed from the application
 
     @Test
     fun tableOfContents_displaysAndNavigates() {

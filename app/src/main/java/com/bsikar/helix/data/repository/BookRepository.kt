@@ -15,4 +15,5 @@ interface BookRepository {
     fun getPlanToReadBooksFlow(): Flow<List<com.bsikar.helix.data.model.Book>>
     fun getCompletedBooksFlow(): Flow<List<com.bsikar.helix.data.model.Book>>
     fun getRecentBooksFlow(): Flow<List<com.bsikar.helix.data.model.Book>>
+    suspend fun updatePlaybackPosition(bookId: String, positionMs: Long, playbackSpeed: Float)
 }

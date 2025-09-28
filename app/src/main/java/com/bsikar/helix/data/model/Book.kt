@@ -21,6 +21,12 @@ enum class CoverDisplayMode {
 }
 
 @Serializable
+enum class BookType {
+    EPUB,     // Traditional e-book
+    AUDIOBOOK // Audio book (M4B, etc.)
+}
+
+@Serializable
 data class Book(
     val id: String = UUID.randomUUID().toString(),
     val title: String,
@@ -57,11 +63,21 @@ data class Book(
     val userSelectedColor: Long? = null, // Override color selected by user
     
     // Explicit reading status (for new books, defaults to UNREAD)
-    val explicitReadingStatus: ReadingStatus? = null // null for backward compatibility
+    val explicitReadingStatus: ReadingStatus? = null, // null for backward compatibility
+    
+    // Book type and audiobook-specific fields
+    val bookType: BookType = BookType.EPUB,
+    val durationMs: Long = 0L, // Total duration for audiobooks
+    val currentPositionMs: Long = 0L, // Current playback position for audiobooks
+    val playbackSpeed: Float = 1.0f // Playback speed for audiobooks
 ) {
     // Convenience property for UI
     val coverColorComposeColor: Color
-        get() = Color(coverColor.toULong())
+        get() = try {
+            Color(coverColor and 0xFFFFFFFFL)
+        } catch (e: Exception) {
+            Color(0xFF6B73FF) // Default blue color as fallback
+        }
     
     /**
      * Get the effective cover color based on user preferences and fallback logic
@@ -71,7 +87,11 @@ data class Book(
             CoverDisplayMode.COLOR_ONLY -> {
                 // Always use color (user selected or default)
                 val colorValue = userSelectedColor ?: coverColor
-                Color(colorValue.toULong())
+                try {
+                    Color(colorValue and 0xFFFFFFFFL)
+                } catch (e: Exception) {
+                    Color(0xFF6B73FF) // Default blue color as fallback
+                }
             }
             CoverDisplayMode.AUTO -> {
                 // Use cover art if available, fallback to color
@@ -81,7 +101,11 @@ data class Book(
                     Color.Transparent
                 } else {
                     val colorValue = userSelectedColor ?: coverColor
-                    Color(colorValue.toULong())
+                    try {
+                        Color(colorValue and 0xFFFFFFFFL)
+                    } catch (e: Exception) {
+                        Color(0xFF6B73FF) // Default blue color as fallback
+                    }
                 }
             }
             CoverDisplayMode.COVER_ART_ONLY -> {
@@ -90,7 +114,7 @@ data class Book(
                     Color.Transparent
                 } else {
                     // Show a neutral placeholder color
-                    Color(0xFF424242UL)
+                    Color(0xFF424242)
                 }
             }
         }
@@ -171,5 +195,54 @@ data class Book(
      */
     fun getTagsByCategory(category: TagCategory): List<Tag> {
         return getTagObjects().filter { it.category == category }
+    }
+    
+    /**
+     * Check if this is an audiobook
+     */
+    fun isAudiobook(): Boolean = bookType == BookType.AUDIOBOOK
+    
+    /**
+     * Get formatted duration for audiobooks
+     */
+    fun getFormattedDuration(): String {
+        if (!isAudiobook() || durationMs == 0L) return ""
+        
+        val hours = durationMs / (1000 * 60 * 60)
+        val minutes = (durationMs % (1000 * 60 * 60)) / (1000 * 60)
+        
+        return when {
+            hours > 0 -> "${hours}h ${minutes}m"
+            minutes > 0 -> "${minutes}m"
+            else -> "< 1m"
+        }
+    }
+    
+    /**
+     * Get formatted current position for audiobooks
+     */
+    fun getFormattedPosition(): String {
+        if (!isAudiobook() || currentPositionMs == 0L) return ""
+        
+        val hours = currentPositionMs / (1000 * 60 * 60)
+        val minutes = (currentPositionMs % (1000 * 60 * 60)) / (1000 * 60)
+        val seconds = (currentPositionMs % (1000 * 60)) / 1000
+        
+        return when {
+            hours > 0 -> "${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+            minutes > 0 -> "${minutes}:${seconds.toString().padStart(2, '0')}"
+            else -> "0:${seconds.toString().padStart(2, '0')}"
+        }
+    }
+    
+    /**
+     * Calculate audiobook progress based on position
+     */
+    fun getAudioProgress(): Float {
+        return if (isAudiobook() && durationMs > 0) {
+            (currentPositionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+        } else {
+            progress
+        }
     }
 }

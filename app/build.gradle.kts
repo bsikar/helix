@@ -101,6 +101,13 @@ dependencies {
     implementation("net.lingala.zip4j:zip4j:2.11.5")
     implementation("org.jsoup:jsoup:1.16.1") // For HTML parsing
     
+    // Audio/M4B support
+    implementation("androidx.media3:media3-exoplayer:1.2.0")
+    implementation("androidx.media3:media3-ui:1.2.0")
+    implementation("androidx.media3:media3-session:1.2.0")
+    implementation("androidx.media3:media3-extractor:1.2.0")
+    implementation("org.mp4parser:isoparser:1.9.27") // For M4B metadata extraction
+    
     // File picker for import functionality
     implementation("androidx.activity:activity-compose:1.8.2")
     

@@ -311,6 +311,17 @@ class LibraryViewModel @Inject constructor(
     }
 
     /**
+     * Updates the playback position for an audiobook
+     */
+    fun updateAudiobookProgress(
+        bookId: String,
+        positionMs: Long,
+        playbackSpeed: Float
+    ) {
+        libraryManager.updateAudiobookProgress(bookId, positionMs, playbackSpeed)
+    }
+
+    /**
      * Updates the tags for a specific book
      */
     fun updateBookTags(bookId: String, newTags: List<String>) {

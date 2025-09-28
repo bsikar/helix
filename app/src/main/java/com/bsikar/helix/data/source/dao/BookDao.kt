@@ -61,4 +61,7 @@ interface BookDao {
     
     @Query("DELETE FROM books")
     suspend fun deleteAllBooks()
+    
+    @Query("UPDATE books SET currentPositionMs = :positionMs, playbackSpeed = :playbackSpeed WHERE id = :bookId")
+    suspend fun updatePlaybackPosition(bookId: String, positionMs: Long, playbackSpeed: Float)
 }

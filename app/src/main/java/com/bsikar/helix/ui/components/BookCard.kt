@@ -22,6 +22,7 @@ import coil.compose.AsyncImage
 import com.bsikar.helix.data.model.Book
 import com.bsikar.helix.data.model.ReadingStatus
 import com.bsikar.helix.data.model.CoverDisplayMode
+import com.bsikar.helix.data.model.BookType
 import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.ui.components.SearchUtils
 import java.io.File
@@ -69,6 +70,16 @@ fun BookCard(
                     fallback = null, // Fall back to background color when image fails
                     error = null // Show background color on error
                 )
+            } else if (book.isAudiobook()) {
+                // Show audio icon for audiobooks without cover art
+                Icon(
+                    Icons.Filled.AudioFile,
+                    contentDescription = "Audiobook",
+                    modifier = Modifier
+                        .size(48.dp)
+                        .align(Alignment.Center),
+                    tint = Color.White.copy(alpha = 0.7f)
+                )
             }
             // Status indicator in top-right corner
             val statusColor = when (book.readingStatus) {
@@ -104,7 +115,8 @@ fun BookCard(
                 )
             }
             
-            if (showProgress && book.progress > 0) {
+            val effectiveProgress = if (book.isAudiobook()) book.getAudioProgress() else book.progress
+            if (showProgress && effectiveProgress > 0) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -114,7 +126,7 @@ fun BookCard(
                 ) {
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(book.progress)
+                            .fillMaxWidth(effectiveProgress)
                             .fillMaxHeight()
                             .background(theme.accentColor)
                             .clip(RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp))
@@ -156,6 +168,28 @@ fun BookCard(
             maxLines = 1,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
         )
+        
+        // Show audiobook info
+        if (book.isAudiobook()) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    Icons.Filled.Headphones,
+                    contentDescription = "Audiobook",
+                    modifier = Modifier.size(10.dp),
+                    tint = theme.accentColor
+                )
+                Text(
+                    text = book.getFormattedDuration(),
+                    fontSize = 10.sp,
+                    color = theme.accentColor,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
         
         if (showContextMenu) {
             DropdownMenu(

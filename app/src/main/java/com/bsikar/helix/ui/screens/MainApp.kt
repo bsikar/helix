@@ -101,26 +101,36 @@ fun MainApp(
             )
         }
         currentBook != null -> {
-            val readerViewModel: ReaderViewModel = hiltViewModel()
-            ReaderScreen(
-                book = currentBook!!,
-                theme = theme,
-                onBackClick = { 
-                    currentBook = null 
-                },
-                onUpdateReadingPosition = { bookId, currentPage, currentChapter, scrollPosition ->
-                    libraryViewModel.updateReadingPosition(bookId, currentPage, currentChapter, scrollPosition)
-                    // Update the currentBook state with the latest data from the updated allBooks list
-                    currentBook = allBooks.find { it.id == bookId } ?: currentBook
-                },
-                onUpdateBookSettings = { updatedBook ->
-                    libraryViewModel.updateBookSettings(updatedBook)
-                    currentBook = updatedBook  // Update the currentBook state immediately
-                },
-                preferencesManager = preferencesManager,
-                libraryManager = libraryViewModel.libraryManager,
-                readerViewModel = readerViewModel
-            )
+            if (currentBook!!.isAudiobook()) {
+                AudioBookReaderScreen(
+                    book = currentBook!!,
+                    theme = theme,
+                    onBackClick = { 
+                        currentBook = null 
+                    }
+                )
+            } else {
+                val readerViewModel: ReaderViewModel = hiltViewModel()
+                ReaderScreen(
+                    book = currentBook!!,
+                    theme = theme,
+                    onBackClick = { 
+                        currentBook = null 
+                    },
+                    onUpdateReadingPosition = { bookId, currentPage, currentChapter, scrollPosition ->
+                        libraryViewModel.updateReadingPosition(bookId, currentPage, currentChapter, scrollPosition)
+                        // Update the currentBook state with the latest data from the updated allBooks list
+                        currentBook = allBooks.find { it.id == bookId } ?: currentBook
+                    },
+                    onUpdateBookSettings = { updatedBook ->
+                        libraryViewModel.updateBookSettings(updatedBook)
+                        currentBook = updatedBook  // Update the currentBook state immediately
+                    },
+                    preferencesManager = preferencesManager,
+                    libraryManager = libraryViewModel.libraryManager,
+                    readerViewModel = readerViewModel
+                )
+            }
         }
         else -> {
             when (selectedTab) {

@@ -20,13 +20,13 @@ import java.util.*
 import android.util.Log
 import com.bsikar.helix.utils.FileUtils
 import com.bsikar.helix.data.model.Book
-import com.bsikar.helix.data.model.Bookmark
 import com.bsikar.helix.data.model.Tag
 import com.bsikar.helix.data.model.TagCategory
 import com.bsikar.helix.data.model.ReadingStatus
 import com.bsikar.helix.data.model.CoverDisplayMode
 import com.bsikar.helix.data.repository.BookRepository
 import com.bsikar.helix.data.parser.EpubParser
+import com.bsikar.helix.data.parser.M4bParser
 import com.bsikar.helix.data.model.ParsedEpub
 import com.bsikar.helix.data.source.dao.WatchedDirectoryDao
 import com.bsikar.helix.data.source.dao.ImportedFileDao
@@ -37,6 +37,7 @@ import com.bsikar.helix.data.mapper.toWatchedDirectories
 import com.bsikar.helix.data.mapper.toImportedFiles
 import com.bsikar.helix.data.repository.EpubMetadataCacheRepository
 import com.bsikar.helix.data.repository.ChapterRepository
+import com.bsikar.helix.data.repository.AudioChapterRepository
 
 @Serializable
 data class WatchedDirectory(
@@ -66,7 +67,9 @@ class LibraryManager(
     private val watchedDirectoryDao: WatchedDirectoryDao,
     private val importedFileDao: ImportedFileDao,
     private val epubMetadataCacheRepository: EpubMetadataCacheRepository,
-    private val chapterRepository: ChapterRepository
+    private val chapterRepository: ChapterRepository,
+    private val audioChapterRepository: AudioChapterRepository,
+    private val m4bParser: M4bParser
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private val epubParser = EpubParser(context)
@@ -528,6 +531,88 @@ class LibraryManager(
         }
     }
 
+    suspend fun importBookFile(file: File): Result<Book> = withContext(Dispatchers.IO) {
+        try {
+            // Determine file type and import accordingly
+            val extension = file.extension.lowercase()
+            when (extension) {
+                "epub" -> importEpubFile(file)
+                "m4b", "m4a", "mp3" -> importAudiobookFile(file)
+                else -> Result.failure(Exception("Unsupported file format: $extension"))
+            }
+        } catch (e: Exception) {
+            Log.e("LibraryManager", "Failed to import book file: ${file.name}", e)
+            Result.failure(e)
+        }
+    }
+    
+    private suspend fun importAudiobookFile(file: File): Result<Book> = withContext(Dispatchers.IO) {
+        try {
+            Log.d("LibraryManager", "Importing audiobook: ${file.name}")
+            
+            // Parse the audiobook file
+            val parseResult = m4bParser.parseM4b(file)
+            
+            if (parseResult.isFailure) {
+                Log.e("LibraryManager", "Failed to parse audiobook: ${file.name}")
+                return@withContext Result.failure(parseResult.exceptionOrNull() ?: Exception("Failed to parse audiobook"))
+            }
+            
+            val parsedM4b = parseResult.getOrThrow()
+            
+            // Check for duplicates
+            val duplicateBook = _books.value.find { existingBook ->
+                existingBook.title.equals(parsedM4b.metadata.title, ignoreCase = true) &&
+                existingBook.author.equals(parsedM4b.metadata.author ?: "Unknown Author", ignoreCase = true)
+            }
+            
+            if (duplicateBook != null) {
+                Log.d("LibraryManager", "Duplicate audiobook detected: ${parsedM4b.metadata.title} by ${parsedM4b.metadata.author}")
+                return@withContext Result.failure(Exception("This audiobook is already in your library"))
+            }
+            
+            // Convert ParsedM4b to Book
+            val bookId = UUID.randomUUID().toString()
+            val book = Book(
+                id = bookId,
+                title = parsedM4b.metadata.title,
+                author = parsedM4b.metadata.author ?: "Unknown Author",
+                filePath = parsedM4b.filePath,
+                fileSize = parsedM4b.fileSize,
+                dateAdded = System.currentTimeMillis(),
+                lastReadTimestamp = System.currentTimeMillis(),
+                description = parsedM4b.metadata.description,
+                publishedDate = parsedM4b.metadata.year,
+                bookType = com.bsikar.helix.data.model.BookType.AUDIOBOOK,
+                durationMs = parsedM4b.durationMs,
+                currentPositionMs = 0L,
+                playbackSpeed = 1.0f,
+                coverColor = generateCoverColor(parsedM4b.metadata.title, parsedM4b.filePath),
+                tags = if (parsedM4b.metadata.genre != null) listOf(parsedM4b.metadata.genre) else emptyList()
+            )
+            
+            // Save book to database first (must exist before chapters due to foreign key constraint)
+            bookRepository.insertBook(book)
+            
+            // Now save chapters to database (they reference the book by ID)
+            val chaptersWithBookId = parsedM4b.chapters.map { chapter ->
+                chapter.copy(bookId = bookId)
+            }
+            audioChapterRepository.insertChapters(chaptersWithBookId)
+            
+            // Add to in-memory list
+            val updatedBooks = _books.value.toMutableList()
+            updatedBooks.add(book)
+            _books.value = updatedBooks
+            
+            Log.d("LibraryManager", "Successfully imported audiobook: ${book.title}")
+            Result.success(book)
+        } catch (e: Exception) {
+            Log.e("LibraryManager", "Failed to import audiobook: ${file.name}", e)
+            Result.failure(e)
+        }
+    }
+    
     suspend fun importEpubFile(file: File): Result<Book> = withContext(Dispatchers.IO) {
         try {
             _isLoading.value = true
@@ -677,7 +762,7 @@ class LibraryManager(
                 // Step 3: Processing content (66% of this file's progress)
                 _importProgress.value = ImportProgress(index + 1, epubFiles.size, "Processing ${file.name}", 0.66f)
                 
-                val result = importEpubFile(file)
+                val result = importBookFile(file)
                 if (result.isSuccess) {
                     importedBooks.add(result.getOrThrow())
                 }
@@ -910,38 +995,47 @@ class LibraryManager(
     }
     
     private fun findEpubFilesFromDocumentFile(directory: DocumentFile): List<DocumentFile> {
-        val epubFiles = mutableListOf<DocumentFile>()
+        val bookFiles = mutableListOf<DocumentFile>()
         
         directory.listFiles().forEach { file ->
             if (file.isDirectory) {
-                epubFiles.addAll(findEpubFilesFromDocumentFile(file))
-            } else if (file.name?.lowercase()?.endsWith(".epub") == true) {
-                epubFiles.add(file)
+                bookFiles.addAll(findEpubFilesFromDocumentFile(file))
+            } else {
+                val fileName = file.name?.lowercase() ?: ""
+                if (fileName.endsWith(".epub") || 
+                    fileName.endsWith(".m4b") || 
+                    fileName.endsWith(".m4a") ||
+                    fileName.endsWith(".mp3")) {
+                    bookFiles.add(file)
+                }
             }
         }
         
-        return epubFiles
+        return bookFiles
     }
     
     private fun findEpubFiles(directory: File, recursive: Boolean): List<File> {
-        val epubFiles = mutableListOf<File>()
+        val bookFiles = mutableListOf<File>()
         
         if (!directory.exists() || !directory.isDirectory) {
-            return epubFiles
+            return bookFiles
         }
         
         directory.listFiles()?.forEach { file ->
             when {
-                file.isFile && file.extension.equals("epub", ignoreCase = true) -> {
-                    epubFiles.add(file)
+                file.isFile -> {
+                    val ext = file.extension.lowercase()
+                    if (ext in listOf("epub", "m4b", "m4a", "mp3")) {
+                        bookFiles.add(file)
+                    }
                 }
                 file.isDirectory && recursive -> {
-                    epubFiles.addAll(findEpubFiles(file, recursive))
+                    bookFiles.addAll(findEpubFiles(file, recursive))
                 }
             }
         }
         
-        return epubFiles
+        return bookFiles
     }
     
     private fun generateCoverColor(title: String, filePath: String? = null): Long {
@@ -975,7 +1069,8 @@ class LibraryManager(
         // Use a more robust hashing approach
         val hash = hashInput.hashCode()
         val colorIndex = kotlin.math.abs(hash) % colors.size
-        return colors[colorIndex].value.toLong()
+        // Ensure the color value is properly masked to avoid conversion issues
+        return (colors[colorIndex].value.toLong() and 0xFFFFFFFFL)
     }
     
     
@@ -1129,6 +1224,50 @@ class LibraryManager(
             if (updatedBook != null) {
                 bookRepository.updateBook(updatedBook)
                 Log.d("LibraryManager", "Updated book progress in database: ${updatedBook.title} -> ${updatedBook.progress}")
+            }
+        }
+    }
+    
+    /**
+     * Update audiobook progress with playback position and speed
+     */
+    fun updateAudiobookProgress(bookId: String, positionMs: Long, playbackSpeed: Float) {
+        val updatedBooks = _books.value.map { book ->
+            if (book.id == bookId && book.isAudiobook()) {
+                // Calculate progress based on position and duration
+                val progress = if (book.durationMs > 0) {
+                    (positionMs.toFloat() / book.durationMs.toFloat()).coerceIn(0f, 1f)
+                } else {
+                    book.progress
+                }
+                
+                // Update explicit status if needed based on progress
+                val newStatus = when {
+                    progress >= 1f && book.explicitReadingStatus != ReadingStatus.COMPLETED -> ReadingStatus.COMPLETED
+                    progress > 0f && progress < 1f && book.explicitReadingStatus == ReadingStatus.UNREAD -> ReadingStatus.READING
+                    else -> book.explicitReadingStatus
+                }
+                
+                book.copy(
+                    currentPositionMs = positionMs,
+                    playbackSpeed = playbackSpeed,
+                    progress = progress,
+                    lastReadTimestamp = System.currentTimeMillis(),
+                    explicitReadingStatus = newStatus
+                )
+            } else {
+                book
+            }
+        }
+        
+        _books.value = updatedBooks
+        
+        // Update the book in the database
+        scope.launch { 
+            val updatedBook = updatedBooks.find { it.id == bookId }
+            if (updatedBook != null) {
+                bookRepository.updateBook(updatedBook)
+                Log.d("LibraryManager", "Updated audiobook progress in database: ${updatedBook.title} -> ${updatedBook.currentPositionMs}ms")
             }
         }
     }
@@ -1355,7 +1494,7 @@ class LibraryManager(
     fun importEpubFileAsync(file: File, onComplete: (Boolean, String) -> Unit) {
         currentImportJob?.cancel() // Cancel any existing import
         currentImportJob = scope.launch {
-            val result = importEpubFile(file)
+            val result = importBookFile(file)
             if (result.isSuccess) {
                 onComplete(true, "EPUB imported successfully!")
             } else {
@@ -1523,6 +1662,37 @@ class LibraryManager(
             val failures = mutableListOf<ImportFailure>()
             var successCount = 0
             var skippedCount = 0
+            var removedCount = 0
+            
+            // First, check if existing books still exist and remove missing ones
+            Log.d("LibraryManager", "Checking for missing books...")
+            val booksToRemove = mutableListOf<Book>()
+            _books.value.forEach { book ->
+                if (!book.filePath.isNullOrBlank()) {
+                    val file = File(book.filePath)
+                    if (!file.exists()) {
+                        Log.w("LibraryManager", "Book file no longer exists: ${book.title} at ${book.filePath}")
+                        booksToRemove.add(book)
+                    }
+                }
+            }
+            
+            // Remove missing books
+            if (booksToRemove.isNotEmpty()) {
+                booksToRemove.forEach { book ->
+                    bookRepository.deleteBook(book.id)
+                    // Also remove associated chapters if audiobook
+                    if (book.isAudiobook()) {
+                        audioChapterRepository.deleteChaptersByBookId(book.id)
+                    }
+                    removedCount++
+                }
+                val updatedBooks = _books.value.toMutableList()
+                updatedBooks.removeAll(booksToRemove)
+                _books.value = updatedBooks
+                Log.d("LibraryManager", "Removed $removedCount missing books from library")
+            }
+            
             val existingFilePaths = _books.value.mapNotNull { it.filePath }.toSet()
             val existingTitles = _books.value.map { "${it.title}:${it.author}" }.toSet()
             
@@ -1553,18 +1723,111 @@ class LibraryManager(
                                 var parsedEpub: ParsedEpub? = null
                                 var permanentFile: File? = null
                                 
-                                try {
-                                    context.contentResolver.openInputStream(docFile.uri)?.use { inputStream ->
-                                        // Use streaming parser for rescan to avoid copying huge files
-                                        val fileSize = docFile.length()
-                                        val parseResult = epubParser.parseEpubMetadataFromStream(inputStream, fileSize, fileName)
-                                        
-                                        if (parseResult.isSuccess) {
-                                            parsedEpub = parseResult.getOrThrow()
+                                // Check file extension to determine parser
+                                val extension = fileName.substringAfterLast('.', "").lowercase()
+                                
+                                if (extension == "epub") {
+                                    try {
+                                        context.contentResolver.openInputStream(docFile.uri)?.use { inputStream ->
+                                            // Use streaming parser for rescan to avoid copying huge files
+                                            val fileSize = docFile.length()
+                                            val parseResult = epubParser.parseEpubMetadataFromStream(inputStream, fileSize, fileName)
+                                            
+                                            if (parseResult.isSuccess) {
+                                                parsedEpub = parseResult.getOrThrow()
+                                            }
                                         }
+                                    } catch (e: Exception) {
+                                        // Parsing from URI failed, we'll need to copy the file
                                     }
-                                } catch (e: Exception) {
-                                    // Parsing from URI failed, we'll need to copy the file
+                                } else if (extension in listOf("m4b", "m4a", "mp3")) {
+                                    // For audiobooks, check if already exists first
+                                    Log.d("LibraryManager", "Processing audiobook during URI rescan: $fileName")
+                                    
+                                    // Check for duplicates by URI or title
+                                    val isDuplicate = _books.value.any { existingBook ->
+                                        existingBook.originalUri == docFile.uri.toString() ||
+                                        (existingBook.filePath == docFile.uri.toString())
+                                    }
+                                    
+                                    if (isDuplicate) {
+                                        Log.d("LibraryManager", "Audiobook already exists, skipping: $fileName")
+                                        skippedCount++
+                                        return@forEachIndexed
+                                    }
+                                    
+                                    try {
+                                        // Update progress
+                                        _importProgress.value = ImportProgress(index + 1, epubFiles.size, "Copying audiobook: $fileName", 0.2f)
+                                        
+                                        // Create a temporary file for parsing
+                                        val tempDir = File(context.cacheDir, "audiobook_temp")
+                                        tempDir.mkdirs()
+                                        val tempFile = File(tempDir, fileName)
+                                        
+                                        // Copy the audiobook file with progress updates
+                                        val fileSize = docFile.length()
+                                        var bytesCopied = 0L
+                                        
+                                        context.contentResolver.openInputStream(docFile.uri)?.use { input ->
+                                            tempFile.outputStream().use { output ->
+                                                val buffer = ByteArray(8192)
+                                                var bytes = input.read(buffer)
+                                                while (bytes >= 0) {
+                                                    output.write(buffer, 0, bytes)
+                                                    bytesCopied += bytes
+                                                    
+                                                    // Update progress (0.2 to 0.6 for copying)
+                                                    val copyProgress = if (fileSize > 0) {
+                                                        0.2f + (0.4f * (bytesCopied.toFloat() / fileSize))
+                                                    } else 0.4f
+                                                    _importProgress.value = ImportProgress(index + 1, epubFiles.size, "Copying audiobook: $fileName", copyProgress)
+                                                    
+                                                    bytes = input.read(buffer)
+                                                }
+                                            }
+                                        }
+                                        
+                                        // Update progress for parsing
+                                        _importProgress.value = ImportProgress(index + 1, epubFiles.size, "Parsing audiobook: $fileName", 0.7f)
+                                        
+                                        // Import the audiobook
+                                        val result = importAudiobookFile(tempFile)
+                                        
+                                        // Clean up temp file immediately
+                                        tempFile.delete()
+                                        
+                                        if (result.isSuccess) {
+                                            val book = result.getOrThrow()
+                                            // Update the book with the correct URI path
+                                            val updatedBook = book.copy(
+                                                filePath = docFile.uri.toString(),
+                                                originalUri = docFile.uri.toString()
+                                            )
+                                            bookRepository.updateBook(updatedBook)
+                                            newBooks.add(updatedBook)
+                                            successCount++
+                                            
+                                            _importProgress.value = ImportProgress(index + 1, epubFiles.size, "Imported: ${book.title}", 1.0f)
+                                            Log.d("LibraryManager", "Successfully imported audiobook: ${book.title}")
+                                        } else {
+                                            failures.add(ImportFailure(
+                                                fileName = fileName,
+                                                filePath = fileName,
+                                                errorMessage = result.exceptionOrNull()?.message ?: "Failed to import audiobook"
+                                            ))
+                                            Log.e("LibraryManager", "Failed to import audiobook: ${result.exceptionOrNull()?.message}")
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e("LibraryManager", "Failed to process audiobook $fileName: ${e.message}", e)
+                                        failures.add(ImportFailure(
+                                            fileName = fileName,
+                                            filePath = fileName,
+                                            errorMessage = "Failed to process audiobook: ${e.message}"
+                                        ))
+                                    }
+                                    
+                                    return@forEachIndexed
                                 }
                                 
                                 // If parsing from URI failed, track as failure
@@ -1713,25 +1976,44 @@ class LibraryManager(
                             val safeSubProgress = if (newFiles.size > 0) index.toFloat() / newFiles.size else 0f
                             _importProgress.value = ImportProgress(index + 1, newFiles.size, "Importing ${file.name}", safeSubProgress)
                             
-                            // Check for duplicates BEFORE importing to prevent adding duplicates to library
-                            val parseResult = epubParser.parseEpubMetadataOnly(file)
-                            if (parseResult.isSuccess) {
-                                val parsedEpub = parseResult.getOrThrow()
-                                
-                                // Check if this book already exists based on title + author + file path
-                                val isDuplicate = _books.value.any { existingBook ->
-                                    existingBook.title == parsedEpub.metadata.title && 
-                                    existingBook.author == (parsedEpub.metadata.author ?: "Unknown Author")
-                                } || _importedFiles.value.any { importedFile ->
-                                    importedFile.originalPath == file.absolutePath
+                            // Check if file still exists
+                            if (!file.exists()) {
+                                Log.w("LibraryManager", "File no longer exists: ${file.absolutePath}")
+                                // Remove the book from library if it exists
+                                val bookToRemove = _books.value.find { it.filePath == file.absolutePath }
+                                if (bookToRemove != null) {
+                                    bookRepository.deleteBook(bookToRemove.id)
+                                    val updatedBooks = _books.value.toMutableList()
+                                    updatedBooks.remove(bookToRemove)
+                                    _books.value = updatedBooks
+                                    Log.d("LibraryManager", "Removed missing book: ${bookToRemove.title}")
                                 }
-                                
-                                if (!isDuplicate) {
-                                    val result = importEpubFileForRescan(file, watchedDir.path)
-                                    if (result.isSuccess) {
-                                        newBooks.add(result.getOrThrow())
-                                    }
+                                return@forEachIndexed
+                            }
+                            
+                            // Check for duplicates by file path
+                            val isDuplicate = _books.value.any { existingBook ->
+                                existingBook.filePath == file.absolutePath
+                            } || _importedFiles.value.any { importedFile ->
+                                importedFile.originalPath == file.absolutePath
+                            }
+                            
+                            if (!isDuplicate) {
+                                // Use importBookFile to handle both EPUBs and audiobooks
+                                val result = importBookFile(file)
+                                if (result.isSuccess) {
+                                    val book = result.getOrThrow()
+                                    newBooks.add(book)
+                                    successCount++
+                                } else {
+                                    failures.add(ImportFailure(
+                                        fileName = file.name,
+                                        filePath = file.absolutePath,
+                                        errorMessage = result.exceptionOrNull()?.message ?: "Unknown error"
+                                    ))
                                 }
+                            } else {
+                                skippedCount++
                             }
                         }
                     }
@@ -1758,11 +2040,12 @@ class LibraryManager(
                 successCount = successCount,
                 skippedCount = skippedCount,
                 failedCount = failures.size,
-                failures = failures
+                failures = failures,
+                removedCount = removedCount
             )
             _lastImportResult.value = importResult
             
-            Log.d("LibraryManager", "Rescan completed. ${importResult.getDisplayMessage()}")
+            Log.d("LibraryManager", "Rescan completed. ${importResult.getDisplayMessage()}, Removed: $removedCount")
             Log.d("LibraryManager", "Returning ${newBooks.size} new books: ${newBooks.map { it.title }}")
             Result.success(newBooks)
         } catch (e: Exception) {
@@ -1853,13 +2136,15 @@ data class ImportResult(
     val successCount: Int,
     val skippedCount: Int,
     val failedCount: Int,
-    val failures: List<ImportFailure> = emptyList()
+    val failures: List<ImportFailure> = emptyList(),
+    val removedCount: Int = 0
 ) {
     fun getDisplayMessage(): String {
         return buildString {
             append("$successCount imported")
             if (skippedCount > 0) append(", $skippedCount skipped")
             if (failedCount > 0) append(", $failedCount failed")
+            if (removedCount > 0) append(", $removedCount removed")
         }
     }
 }

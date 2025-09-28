@@ -8,6 +8,7 @@ import com.bsikar.helix.data.model.ImportStatus
 import com.bsikar.helix.data.model.ImportProgress
 import com.bsikar.helix.data.source.dao.ImportTaskDao
 import com.bsikar.helix.workers.EpubImportWorker
+import com.bsikar.helix.workers.M4bImportWorker
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.CoroutineScope
@@ -88,16 +89,26 @@ class ImportManager @Inject constructor(
         )
         importTaskDao.insertImportTask(importTask)
 
-        // Create and enqueue work request
-        val workRequest = EpubImportWorker.createWorkRequest(fileUriString, fileName)
+        // Create and enqueue work request based on file type
+        val workRequest = if (fileName.endsWith(".m4b", ignoreCase = true)) {
+            M4bImportWorker.createWorkRequest(fileUriString, fileName)
+        } else {
+            EpubImportWorker.createWorkRequest(fileUriString, fileName)
+        }
         
         // Update task with worker ID
         val updatedTask = importTask.copy(workerId = workRequest.id.toString())
         importTaskDao.updateImportTask(updatedTask)
 
-        // Enqueue the work
+        // Enqueue the work with appropriate name
+        val workName = if (fileName.endsWith(".m4b", ignoreCase = true)) {
+            "m4b_import_$importId"
+        } else {
+            "epub_import_$importId"
+        }
+        
         workManager.enqueueUniqueWork(
-            "epub_import_$importId",
+            workName,
             ExistingWorkPolicy.KEEP,
             workRequest
         )

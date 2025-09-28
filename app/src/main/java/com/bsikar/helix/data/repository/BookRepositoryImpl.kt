@@ -51,4 +51,8 @@ class BookRepositoryImpl @Inject constructor(
 
     override fun getRecentBooksFlow(): Flow<List<com.bsikar.helix.data.model.Book>> = 
         bookDao.getRecentBooksFlow().map { entities -> entities.map { it.toBook() } }
+    
+    override suspend fun updatePlaybackPosition(bookId: String, positionMs: Long, playbackSpeed: Float) {
+        bookDao.updatePlaybackPosition(bookId, positionMs, playbackSpeed)
+    }
 }

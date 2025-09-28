@@ -41,5 +41,11 @@ data class BookEntity(
     val userEditedMetadata: Boolean = false,
     
     // Explicit reading status for user organization
-    val explicitReadingStatus: String? = null // ReadingStatus enum as string, null for backward compatibility
+    val explicitReadingStatus: String? = null, // ReadingStatus enum as string, null for backward compatibility
+    
+    // Audiobook-specific fields
+    val bookType: String = "EPUB", // BookType enum as string
+    val durationMs: Long = 0L, // Total duration for audiobooks
+    val currentPositionMs: Long = 0L, // Current playback position for audiobooks
+    val playbackSpeed: Float = 1.0f // Playback speed for audiobooks
 )

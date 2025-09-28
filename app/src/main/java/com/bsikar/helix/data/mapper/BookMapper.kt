@@ -3,6 +3,7 @@ package com.bsikar.helix.data.mapper
 import com.bsikar.helix.data.model.Book
 import com.bsikar.helix.data.model.ReadingStatus
 import com.bsikar.helix.data.model.CoverDisplayMode
+import com.bsikar.helix.data.model.BookType
 import com.bsikar.helix.data.source.entities.BookEntity
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
@@ -65,7 +66,15 @@ fun BookEntity.toBook(): Book {
             } catch (e: Exception) {
                 null
             }
-        }
+        },
+        bookType = try {
+            BookType.valueOf(bookType)
+        } catch (e: Exception) {
+            BookType.EPUB
+        },
+        durationMs = durationMs,
+        currentPositionMs = currentPositionMs,
+        playbackSpeed = playbackSpeed
     )
 }
 
@@ -100,6 +109,10 @@ fun Book.toBookEntity(): BookEntity {
         userSelectedColor = userSelectedColor,
         fileChecksum = fileChecksum,
         userEditedMetadata = userEditedMetadata,
-        explicitReadingStatus = explicitReadingStatus?.name
+        explicitReadingStatus = explicitReadingStatus?.name,
+        bookType = bookType.name,
+        durationMs = durationMs,
+        currentPositionMs = currentPositionMs,
+        playbackSpeed = playbackSpeed
     )
 }

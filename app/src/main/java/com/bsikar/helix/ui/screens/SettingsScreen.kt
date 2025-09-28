@@ -65,10 +65,10 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     var importMessage by remember { mutableStateOf("") }
     
-    // Get import progress from LibraryManager
-    val importProgress by libraryManager?.importProgress ?: remember { mutableStateOf(null) }
-    val lastImportResult by libraryManager?.lastImportResult ?: remember { mutableStateOf(null) }
-    val isLoading by libraryManager?.isLoading ?: remember { mutableStateOf(false) }
+    // Get import progress from LibraryManager - avoid state delegation issues
+    val importProgress = libraryManager?.importProgress?.value
+    val lastImportResult = libraryManager?.lastImportResult?.value
+    val isLoading = libraryManager?.isLoading?.value ?: false
     
     // Scroll state for auto-scrolling to sections
     val listState = rememberLazyListState()
@@ -154,10 +154,8 @@ fun SettingsScreen(
             }
             
             // Show import progress
-            importProgress?.let { progress ->
-                // Only show progress if we have a valid total count
-                if (progress.displayTotal > 0) {
-                    item {
+            if (importProgress != null && importProgress!!.displayTotal > 0) {
+                item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = theme.surfaceColor)
@@ -174,22 +172,22 @@ fun SettingsScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 CircularProgressIndicator(
-                                progress = { progress.percentage / 100f },
-                                modifier = Modifier.size(24.dp),
-                                color = theme.accentColor,
-                                strokeWidth = 3.dp,
-                                trackColor = ProgressIndicatorDefaults.circularIndeterminateTrackColor,
-                                strokeCap = ProgressIndicatorDefaults.CircularDeterminateStrokeCap,
+                                    progress = { importProgress!!.percentage / 100f },
+                                    modifier = Modifier.size(24.dp),
+                                    color = theme.accentColor,
+                                    strokeWidth = 3.dp,
+                                    trackColor = ProgressIndicatorDefaults.circularIndeterminateTrackColor,
+                                    strokeCap = ProgressIndicatorDefaults.CircularDeterminateStrokeCap,
                                 )
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "Importing... ${progress.percentage}%",
+                                        text = "Importing... ${importProgress!!.percentage}%",
                                         color = theme.primaryTextColor,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Medium
                                     )
                                     Text(
-                                        text = if (progress.displayTotal > 0) "${progress.displayCurrent} of ${progress.displayTotal} files" else "Preparing...",
+                                        text = if (importProgress!!.displayTotal > 0) "${importProgress!!.displayCurrent} of ${importProgress!!.displayTotal} files" else "Preparing...",
                                         color = theme.secondaryTextColor,
                                         fontSize = 12.sp
                                     )
@@ -209,16 +207,15 @@ fun SettingsScreen(
                                     )
                                 }
                             }
-                            if (progress.currentFile.isNotEmpty()) {
+                            if (importProgress!!.currentFile.isNotEmpty()) {
                                 Text(
-                                    text = progress.currentFile,
+                                    text = importProgress!!.currentFile,
                                     color = theme.secondaryTextColor,
                                     fontSize = 11.sp,
                                     maxLines = 1
                                 )
                             }
                         }
-                    }
                     }
                 }
             }
@@ -450,9 +447,9 @@ fun WatchedDirectoriesView(
     importMessage: String,
     onMessageChange: (String) -> Unit
 ) {
-    val watchedDirectories by libraryManager.watchedDirectories
-    val isLoading by libraryManager.isLoading
-    val importProgress by libraryManager.importProgress
+    val watchedDirectories = libraryManager.watchedDirectories.value
+    val isLoading = libraryManager.isLoading.value
+    val importProgress = libraryManager.importProgress.value
     
     Column(
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -578,9 +575,9 @@ fun LibrarySummaryView(
     libraryManager: LibraryManager,
     theme: AppTheme
 ) {
-    val books by libraryManager.books
-    val watchedDirectories by libraryManager.watchedDirectories
-    val importedFiles by libraryManager.importedFiles
+    val books = libraryManager.books.value
+    val watchedDirectories = libraryManager.watchedDirectories.value
+    val importedFiles = libraryManager.importedFiles.value
     
     val readingBooks = books.filter { it.progress > 0f && it.progress < 1f }
     val completedBooks = books.filter { it.progress >= 1f }

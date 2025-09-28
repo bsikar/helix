@@ -16,7 +16,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
-import com.bsikar.helix.data.repository.BookmarkRepository
 
 data class UserPreferences(
     val themeMode: ThemeMode = ThemeMode.LIGHT,
@@ -24,7 +23,6 @@ data class UserPreferences(
     val savedCustomPresets: List<ReaderPreset?> = listOf(null, null, null),
     val currentPresetName: String? = null,
     val lastSelectedPresetType: PresetType = PresetType.DEFAULT
-    // Note: bookmarks are now managed by BookmarkRepository, not stored in preferences
 )
 
 enum class PresetType {
@@ -35,8 +33,7 @@ enum class PresetType {
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "user_preferences")
 
 class UserPreferencesManager(
-    private val context: Context,
-    private val bookmarkRepository: BookmarkRepository
+    private val context: Context
 ) {
     private val scope = CoroutineScope(Dispatchers.IO)
     
@@ -354,45 +351,6 @@ class UserPreferencesManager(
     
     fun hasInitialLoadCompleted(): Boolean {
         return hasInitialLoad
-    }
-    
-    // Bookmark management functions - now delegated to BookmarkRepository
-    fun getBookmarks(bookId: String? = null): List<com.bsikar.helix.data.model.Bookmark> {
-        return runBlocking {
-            if (bookId != null) {
-                bookmarkRepository.getBookmarksForBook(bookId)
-            } else {
-                bookmarkRepository.getAllBookmarks()
-            }
-        }
-    }
-    
-    fun getBookmarksFlow(bookId: String): kotlinx.coroutines.flow.Flow<List<com.bsikar.helix.data.model.Bookmark>> {
-        return bookmarkRepository.getBookmarksForBookFlow(bookId)
-    }
-    
-    fun addBookmark(bookmark: com.bsikar.helix.data.model.Bookmark) {
-        scope.launch {
-            bookmarkRepository.addBookmark(bookmark)
-        }
-    }
-    
-    fun removeBookmark(bookmarkId: String) {
-        scope.launch {
-            bookmarkRepository.deleteBookmark(bookmarkId)
-        }
-    }
-    
-    fun updateBookmarkNote(bookmarkId: String, note: String) {
-        scope.launch {
-            bookmarkRepository.updateBookmarkNote(bookmarkId, note)
-        }
-    }
-    
-    fun isPageBookmarked(bookId: String, chapterNumber: Int, pageNumber: Int): Boolean {
-        return runBlocking {
-            bookmarkRepository.isPageBookmarked(bookId, chapterNumber, pageNumber)
-        }
     }
     
     // Library management functions
