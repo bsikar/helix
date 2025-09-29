@@ -12,6 +12,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.bsikar.helix.R
 import com.bsikar.helix.data.model.Book
 import com.bsikar.helix.data.model.UiState
+import com.bsikar.helix.data.model.ReadingStatus
 import com.bsikar.helix.data.UserPreferencesManager
 import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.theme.ThemeMode
@@ -29,6 +30,13 @@ fun MainApp(
     importManager: ImportManager? = null
 ) {
     var selectedTab by remember { mutableStateOf(0) }
+    
+    // Redirect any tab 3 selections to tab 0 (Library) since we removed the Listening tab
+    LaunchedEffect(selectedTab) {
+        if (selectedTab >= 3) {
+            selectedTab = 0
+        }
+    }
     var showSettings by remember { mutableStateOf(false) }
     var settingsScrollTarget by remember { mutableStateOf<String?>(null) }
     var currentBook by remember { mutableStateOf<Book?>(null) }
@@ -37,7 +45,7 @@ fun MainApp(
     // Collect states from ViewModel - use filtered results for search functionality
     val allBooks by libraryViewModel.allBooks.collectAsState()
     val readingBooks by libraryViewModel.filteredReadingBooks.collectAsState()
-    val planToReadBooks by libraryViewModel.filteredPlanToReadBooks.collectAsState()
+    val onDeckBooks by libraryViewModel.filteredOnDeckBooks.collectAsState()
     val completedBooks by libraryViewModel.filteredCompletedBooks.collectAsState()
     val recentBooks by libraryViewModel.recentBooks.collectAsState()
     val libraryState by libraryViewModel.libraryState.collectAsState()
@@ -46,7 +54,7 @@ fun MainApp(
     
     // Collect sorting states
     val readingSortAscending by libraryViewModel.readingSortAscending.collectAsState()
-    val planToReadSortAscending by libraryViewModel.planToReadSortAscending.collectAsState()
+    val onDeckSortAscending by libraryViewModel.onDeckSortAscending.collectAsState()
     val completedSortAscending by libraryViewModel.completedSortAscending.collectAsState()
 
     // Handle global library state (for operations like imports/scans)
@@ -102,6 +110,10 @@ fun MainApp(
         }
         currentBook != null -> {
             if (currentBook!!.isAudiobook()) {
+                // Automatically mark audiobook as listening when opening
+                LaunchedEffect(currentBook!!.id) {
+                    libraryViewModel.startReading(currentBook!!.id)
+                }
                 AudioBookReaderScreen(
                     book = currentBook!!,
                     theme = theme,
@@ -136,13 +148,18 @@ fun MainApp(
             when (selectedTab) {
                 0 -> LibraryScreen(
                     selectedTab = selectedTab,
-                    onTabSelected = { selectedTab = it },
+                    onTabSelected = { newTab -> if (newTab in 0..2) selectedTab = newTab },
                     currentTheme = currentTheme,
                     onThemeChange = onThemeChange,
                     theme = theme,
                     readingBooks = readingBooks,
-                    planToReadBooks = planToReadBooks,
+                    onDeckBooks = onDeckBooks,
                     completedBooks = completedBooks,
+                    allBooks = allBooks,
+                    currentlyPlayingAudiobook = allBooks
+                        .filter { it.isAudiobook() }
+                        .filter { it.progress > 0f && it.progress < 1f } // Has been started but not completed
+                        .maxByOrNull { it.lastReadTimestamp }, // Most recently accessed
                     onNavigateToSettings = { 
                         showSettings = true
                         settingsScrollTarget = null
@@ -155,10 +172,11 @@ fun MainApp(
                     onSeeAllClick = { title, books -> seeAllData = title to books },
                     onStartReading = { bookId -> libraryViewModel.startReading(bookId) },
                     onMarkCompleted = { bookId -> libraryViewModel.markAsCompleted(bookId) },
-                    onMoveToPlanToRead = { bookId -> libraryViewModel.moveToPlanToRead(bookId) },
+                    onMoveToOnDeck = { bookId -> libraryViewModel.moveToOnDeck(bookId) },
                     onSetProgress = { bookId, progress -> libraryViewModel.setBookProgress(bookId, progress) },
                     onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) },
                     onUpdateBookSettings = { book -> libraryViewModel.updateBookSettings(book) },
+                    onRemoveFromLibrary = { bookId -> libraryViewModel.removeFromLibrary(bookId) },
                     libraryManager = libraryViewModel.libraryManager,
                     libraryState = libraryState,
                     errorMessage = errorMessage,
@@ -166,30 +184,30 @@ fun MainApp(
                     onSearchQueryChange = { query -> libraryViewModel.updateSearchQuery(query) },
                     // Sorting parameters
                     readingSortAscending = readingSortAscending,
-                    planToReadSortAscending = planToReadSortAscending,
+                    onDeckSortAscending = onDeckSortAscending,
                     completedSortAscending = completedSortAscending,
                     onToggleReadingSort = { libraryViewModel.toggleReadingSortOrder() },
-                    onTogglePlanToReadSort = { libraryViewModel.togglePlanToReadSortOrder() },
+                    onToggleOnDeckSort = { libraryViewModel.toggleOnDeckSortOrder() },
                     onToggleCompletedSort = { libraryViewModel.toggleCompletedSortOrder() },
                     onRefresh = { libraryViewModel.refreshBooks() }
                 )
                 1 -> RecentsScreen(
                     selectedTab = selectedTab,
-                    onTabSelected = { selectedTab = it },
+                    onTabSelected = { newTab -> if (newTab in 0..2) selectedTab = newTab },
                     theme = theme,
                     recentBooks = recentBooks,
                     onNavigateToSettings = { showSettings = true },
                     onBookClick = { book -> currentBook = book },
                     onStartReading = { bookId -> libraryViewModel.startReading(bookId) },
                     onMarkCompleted = { bookId -> libraryViewModel.markAsCompleted(bookId) },
-                    onMoveToPlanToRead = { bookId -> libraryViewModel.moveToPlanToRead(bookId) },
+                    onMoveToOnDeck = { bookId -> libraryViewModel.moveToOnDeck(bookId) },
                     onSetProgress = { bookId, progress -> libraryViewModel.setBookProgress(bookId, progress) },
                     onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) },
                     onRefresh = { libraryViewModel.refreshBooks() }
                 )
                 2 -> BrowseScreen(
                     selectedTab = selectedTab,
-                    onTabSelected = { selectedTab = it },
+                    onTabSelected = { newTab -> if (newTab in 0..2) selectedTab = newTab },
                     theme = theme,
                     onNavigateToSettings = { showSettings = true },
                     onBookClick = { book -> currentBook = book },
@@ -197,21 +215,27 @@ fun MainApp(
                     allBooks = allBooks,
                     onStartReading = { bookId -> libraryViewModel.startReading(bookId) },
                     onMarkCompleted = { bookId -> libraryViewModel.markAsCompleted(bookId) },
-                    onMoveToPlanToRead = { bookId -> libraryViewModel.moveToPlanToRead(bookId) },
+                    onMoveToOnDeck = { bookId -> libraryViewModel.moveToOnDeck(bookId) },
                     onSetProgress = { bookId, progress -> libraryViewModel.setBookProgress(bookId, progress) },
                     onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) },
                     onUpdateBookSettings = { book -> libraryViewModel.updateBookSettings(book) },
+                    onRemoveFromLibrary = { bookId -> libraryViewModel.removeBook(bookId) },
                     onRefresh = { libraryViewModel.refreshBooks() }
                 )
                 else -> LibraryScreen(
-                    selectedTab = selectedTab,
-                    onTabSelected = { selectedTab = it },
+                    selectedTab = 0, // Force to tab 0 when in unknown state
+                    onTabSelected = { newTab -> if (newTab in 0..2) selectedTab = newTab },
                     currentTheme = currentTheme,
                     onThemeChange = onThemeChange,
                     theme = theme,
                     readingBooks = readingBooks,
-                    planToReadBooks = planToReadBooks,
+                    onDeckBooks = onDeckBooks,
                     completedBooks = completedBooks,
+                    allBooks = allBooks,
+                    currentlyPlayingAudiobook = allBooks
+                        .filter { it.isAudiobook() }
+                        .filter { it.progress > 0f && it.progress < 1f } // Has been started but not completed
+                        .maxByOrNull { it.lastReadTimestamp }, // Most recently accessed
                     onNavigateToSettings = { 
                         showSettings = true
                         settingsScrollTarget = null
@@ -224,7 +248,7 @@ fun MainApp(
                     onSeeAllClick = { title, books -> seeAllData = title to books },
                     onStartReading = { bookId -> libraryViewModel.startReading(bookId) },
                     onMarkCompleted = { bookId -> libraryViewModel.markAsCompleted(bookId) },
-                    onMoveToPlanToRead = { bookId -> libraryViewModel.moveToPlanToRead(bookId) },
+                    onMoveToOnDeck = { bookId -> libraryViewModel.moveToOnDeck(bookId) },
                     onSetProgress = { bookId, progress -> libraryViewModel.setBookProgress(bookId, progress) },
                     onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) },
                     onUpdateBookSettings = { book -> libraryViewModel.updateBookSettings(book) },
@@ -235,11 +259,12 @@ fun MainApp(
                     onSearchQueryChange = { query -> libraryViewModel.updateSearchQuery(query) },
                     // Sorting parameters
                     readingSortAscending = readingSortAscending,
-                    planToReadSortAscending = planToReadSortAscending,
+                    onDeckSortAscending = onDeckSortAscending,
                     completedSortAscending = completedSortAscending,
                     onToggleReadingSort = { libraryViewModel.toggleReadingSortOrder() },
-                    onTogglePlanToReadSort = { libraryViewModel.togglePlanToReadSortOrder() },
-                    onToggleCompletedSort = { libraryViewModel.toggleCompletedSortOrder() }
+                    onToggleOnDeckSort = { libraryViewModel.toggleOnDeckSortOrder() },
+                    onToggleCompletedSort = { libraryViewModel.toggleCompletedSortOrder() },
+                    onRefresh = { libraryViewModel.refreshBooks() }
                 )
             }
         }

@@ -47,8 +47,8 @@ class LibraryViewModel @Inject constructor(
     private val _readingSortAscending = MutableStateFlow(false)
     val readingSortAscending: StateFlow<Boolean> = _readingSortAscending.asStateFlow()
     
-    private val _planToReadSortAscending = MutableStateFlow(true)
-    val planToReadSortAscending: StateFlow<Boolean> = _planToReadSortAscending.asStateFlow()
+    private val _onDeckSortAscending = MutableStateFlow(true)
+    val onDeckSortAscending: StateFlow<Boolean> = _onDeckSortAscending.asStateFlow()
     
     private val _completedSortAscending = MutableStateFlow(true)
     val completedSortAscending: StateFlow<Boolean> = _completedSortAscending.asStateFlow()
@@ -102,9 +102,9 @@ class LibraryViewModel @Inject constructor(
         books.forEach { book ->
             println("  Book ${book.title}: progress=${book.progress}, explicitStatus=${book.explicitReadingStatus}, readingStatus=${book.readingStatus}")
         }
-        val reading = books.filter { it.readingStatus == ReadingStatus.READING }
+        val reading = books.filter { it.readingStatus == ReadingStatus.READING || it.readingStatus == ReadingStatus.LISTENING }
              .sortedByDescending { it.lastReadTimestamp }
-        println("  Result: ${reading.size} books in READING status")
+        println("  Result: ${reading.size} books in READING/LISTENING status")
         reading
     }.stateIn(
         scope = viewModelScope,
@@ -112,9 +112,9 @@ class LibraryViewModel @Inject constructor(
         initialValue = emptyList()
     )
 
-    // Plan to Read Books
-    val planToReadBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = allBooks.map { books ->
-        books.filter { it.readingStatus == ReadingStatus.PLAN_TO_READ }
+    // On Deck Books
+    val onDeckBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = allBooks.map { books ->
+        books.filter { it.readingStatus == ReadingStatus.PLAN_TO_READ || it.readingStatus == ReadingStatus.PLAN_TO_LISTEN }
              .sortedBy { it.title }
     }.stateIn(
         scope = viewModelScope,
@@ -168,11 +168,11 @@ class LibraryViewModel @Inject constructor(
         initialValue = emptyList()
     )
 
-    // Filtered and sorted plan to read books
-    val filteredPlanToReadBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = combine(
-        planToReadBooks,
+    // Filtered and sorted on deck books
+    val filteredOnDeckBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = combine(
+        onDeckBooks,
         debouncedSearchQuery,
-        planToReadSortAscending
+        onDeckSortAscending
     ) { books, query, sortAscending ->
         val filtered = if (query.isBlank()) {
             books
@@ -227,26 +227,63 @@ class LibraryViewModel @Inject constructor(
     }
 
     /**
-     * Marks a book as started reading (sets explicit reading status with 0% progress)
+     * Marks a book as started reading (sets explicit reading status, preserves existing progress)
      */
     fun startReading(bookId: String) {
-        // Set explicit reading status so it shows in Reading section even at 0% progress
-        libraryManager.updateBookStatus(bookId, ReadingStatus.READING)
-        libraryManager.updateBookProgressDirect(bookId, 0.0f) // Start at 0%
+        // Find the book to determine if it's an audiobook or text book
+        val book = _allBooks.value.find { it.id == bookId }
+        val status = if (book?.isAudiobook() == true) {
+            ReadingStatus.LISTENING
+        } else {
+            ReadingStatus.READING
+        }
+        
+        // Only reset progress if the book hasn't been started before
+        if (book != null) {
+            val hasExistingProgress = if (book.isAudiobook()) {
+                book.currentPositionMs > 0 || book.progress > 0f
+            } else {
+                book.progress > 0f
+            }
+            
+            if (hasExistingProgress) {
+                // Just update status, preserve existing progress
+                libraryManager.updateBookStatus(bookId, status)
+            } else {
+                // New book, set status and reset progress to 0
+                libraryManager.updateBookStatusAndProgress(bookId, status, 0.0f)
+            }
+        }
     }
     
     /**
-     * Moves a book to Plan to Read status (explicitly set by user)
+     * Moves a book to On Deck status (explicitly set by user)
      */
-    fun moveToPlanToRead(bookId: String) {
-        libraryManager.updateBookStatus(bookId, ReadingStatus.PLAN_TO_READ)
+    fun moveToOnDeck(bookId: String) {
+        // Find the book to determine if it's an audiobook or text book
+        val book = _allBooks.value.find { it.id == bookId }
+        val status = if (book?.isAudiobook() == true) {
+            ReadingStatus.PLAN_TO_LISTEN
+        } else {
+            ReadingStatus.PLAN_TO_READ
+        }
+        libraryManager.updateBookStatus(bookId, status)
     }
     
     /**
-     * Removes a book from Plan to Read (moves back to unread status)
+     * Removes a book from On Deck (moves back to unread status)
      */
-    fun removeFromPlanToRead(bookId: String) {
+    fun removeFromOnDeck(bookId: String) {
         libraryManager.updateBookStatus(bookId, ReadingStatus.UNREAD)
+    }
+    
+    /**
+     * Removes a book from library (resets to unread status, but keeps in browse and recents)
+     */
+    fun removeFromLibrary(bookId: String) {
+        libraryManager.updateBookStatus(bookId, ReadingStatus.UNREAD)
+        // Don't reset progress to preserve recents functionality and reading history
+        // The UNREAD status is sufficient to remove it from active reading sections
     }
     
     /**
@@ -408,8 +445,8 @@ class LibraryViewModel @Inject constructor(
         _readingSortAscending.value = !_readingSortAscending.value
     }
 
-    fun togglePlanToReadSortOrder() {
-        _planToReadSortAscending.value = !_planToReadSortAscending.value
+    fun toggleOnDeckSortOrder() {
+        _onDeckSortAscending.value = !_onDeckSortAscending.value
     }
 
     fun toggleCompletedSortOrder() {

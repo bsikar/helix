@@ -50,7 +50,7 @@ fun RecentsScreen(
     onBookClick: (Book) -> Unit = {},
     onStartReading: (String) -> Unit = {},
     onMarkCompleted: (String) -> Unit = {},
-    onMoveToPlanToRead: (String) -> Unit = {},
+    onMoveToOnDeck: (String) -> Unit = {},
     onSetProgress: (String, Float) -> Unit = { _, _ -> },
     onEditTags: (String, List<String>) -> Unit = { _, _ -> },
     onRefresh: () -> Unit = {}
@@ -78,7 +78,7 @@ fun RecentsScreen(
         when (sortBy) {
             "Recent" -> books.sortedByDescending { it.lastReadTimestamp }
             "Title" -> books.sortedBy { it.title }
-            "Progress" -> books.sortedByDescending { it.progress }
+            "Progress" -> books.sortedByDescending { if (it.isAudiobook()) it.getAudioProgress() else it.progress }
             else -> books
         }
     }
@@ -221,7 +221,7 @@ fun RecentsScreen(
                         onBookClick = { onBookClick(book) },
                         onStartReading = onStartReading,
                         onMarkCompleted = onMarkCompleted,
-                        onMoveToPlanToRead = onMoveToPlanToRead,
+                        onMoveToOnDeck = onMoveToOnDeck,
                         onSetProgress = onSetProgress,
                         onEditTags = onEditTags
                     )
@@ -306,7 +306,7 @@ fun RecentBookItem(
     onBookClick: () -> Unit,
     onStartReading: (String) -> Unit = {},
     onMarkCompleted: (String) -> Unit = {},
-    onMoveToPlanToRead: (String) -> Unit = {},
+    onMoveToOnDeck: (String) -> Unit = {},
     onSetProgress: (String, Float) -> Unit = { _, _ -> },
     onEditTags: (String, List<String>) -> Unit = { _, _ -> }
 ) {
@@ -400,7 +400,7 @@ fun RecentBookItem(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "${String.format("%.2f", book.progress * 100)}%",
+                            text = "${String.format("%.2f", (if (book.isAudiobook()) book.getAudioProgress() else book.progress) * 100)}%",
                             fontSize = 12.sp,
                             color = theme.accentColor,
                             fontWeight = FontWeight.Medium
@@ -421,7 +421,7 @@ fun RecentBookItem(
                     ) {
                         Box(
                             modifier = Modifier
-                                .fillMaxWidth(book.progress.coerceIn(0f, 1f))
+                                .fillMaxWidth((if (book.isAudiobook()) book.getAudioProgress() else book.progress).coerceIn(0f, 1f))
                                 .fillMaxHeight()
                                 .background(
                                     color = theme.accentColor,
@@ -458,7 +458,7 @@ fun RecentBookItem(
                             )
                         },
                         onClick = {
-                            onMoveToPlanToRead(book.id)
+                            onMoveToOnDeck(book.id)
                             showContextMenu = false
                         },
                         leadingIcon = {
@@ -548,6 +548,86 @@ fun RecentBookItem(
                         }
                     )
                 }
+                ReadingStatus.PLAN_TO_LISTEN -> {
+                    DropdownMenuItem(
+                        text = { 
+                            Text(
+                                "Start Listening",
+                                color = theme.primaryTextColor
+                            )
+                        },
+                        onClick = {
+                            onStartReading(book.id)
+                            showContextMenu = false
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.PlayArrow,
+                                contentDescription = null,
+                                tint = theme.accentColor
+                            )
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { 
+                            Text(
+                                "Mark as Finished",
+                                color = theme.primaryTextColor
+                            )
+                        },
+                        onClick = {
+                            onMarkCompleted(book.id)
+                            showContextMenu = false
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.CheckCircle,
+                                contentDescription = null,
+                                tint = Color(0xFF4CAF50)
+                            )
+                        }
+                    )
+                }
+                ReadingStatus.LISTENING -> {
+                    DropdownMenuItem(
+                        text = { 
+                            Text(
+                                "Mark as Completed",
+                                color = theme.primaryTextColor
+                            )
+                        },
+                        onClick = {
+                            onMarkCompleted(book.id)
+                            showContextMenu = false
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.CheckCircle,
+                                contentDescription = null,
+                                tint = theme.accentColor
+                            )
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { 
+                            Text(
+                                "Move to Plan to Listen",
+                                color = theme.primaryTextColor
+                            )
+                        },
+                        onClick = {
+                            onMoveToOnDeck(book.id)
+                            showContextMenu = false
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.Schedule,
+                                contentDescription = null,
+                                tint = theme.secondaryTextColor
+                            )
+                        }
+                    )
+                }
                 ReadingStatus.READING -> {
                     DropdownMenuItem(
                         text = { 
@@ -576,7 +656,7 @@ fun RecentBookItem(
                             )
                         },
                         onClick = {
-                            onMoveToPlanToRead(book.id)
+                            onMoveToOnDeck(book.id)
                             showContextMenu = false
                         },
                         leadingIcon = {
@@ -597,7 +677,7 @@ fun RecentBookItem(
                             )
                         },
                         onClick = {
-                            onMoveToPlanToRead(book.id)
+                            onMoveToOnDeck(book.id)
                             showContextMenu = false
                         },
                         leadingIcon = {

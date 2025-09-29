@@ -573,22 +573,12 @@ class LibraryManager(
             
             // Convert ParsedM4b to Book
             val bookId = UUID.randomUUID().toString()
-            val book = Book(
-                id = bookId,
-                title = parsedM4b.metadata.title,
-                author = parsedM4b.metadata.author ?: "Unknown Author",
-                filePath = parsedM4b.filePath,
-                fileSize = parsedM4b.fileSize,
+            val book = m4bParser.createBookFromParsedM4b(parsedM4b, bookId).copy(
+                // Override with LibraryManager-specific settings
                 dateAdded = System.currentTimeMillis(),
                 lastReadTimestamp = System.currentTimeMillis(),
-                description = parsedM4b.metadata.description,
-                publishedDate = parsedM4b.metadata.year,
-                bookType = com.bsikar.helix.data.model.BookType.AUDIOBOOK,
-                durationMs = parsedM4b.durationMs,
-                currentPositionMs = 0L,
-                playbackSpeed = 1.0f,
-                coverColor = generateCoverColor(parsedM4b.metadata.title, parsedM4b.filePath),
-                tags = if (parsedM4b.metadata.genre != null) listOf(parsedM4b.metadata.genre) else emptyList()
+                explicitReadingStatus = com.bsikar.helix.data.model.ReadingStatus.PLAN_TO_LISTEN,
+                isImported = true
             )
             
             // Save book to database first (must exist before chapters due to foreign key constraint)
@@ -1069,8 +1059,9 @@ class LibraryManager(
         // Use a more robust hashing approach
         val hash = hashInput.hashCode()
         val colorIndex = kotlin.math.abs(hash) % colors.size
-        // Ensure the color value is properly masked to avoid conversion issues
-        return (colors[colorIndex].value.toLong() and 0xFFFFFFFFL)
+        // Convert color value to Long properly to avoid transparency issues
+        // Always use the full color value as signed Long
+        return colors[colorIndex].value.toLong()
     }
     
     
@@ -1196,6 +1187,47 @@ class LibraryManager(
      * Update book progress directly with a given progress value
      * This is used when starting reading or manually setting progress
      */
+    /**
+     * Atomically updates both book status and progress to avoid race conditions
+     */
+    fun updateBookStatusAndProgress(bookId: String, status: ReadingStatus, progress: Float) {
+        val updatedBooks = _books.value.map { book ->
+            if (book.id == bookId) {
+                // For audiobooks, also update currentPositionMs to match progress
+                val updatedCurrentPosition = if (book.isAudiobook()) {
+                    when {
+                        progress == 0f -> 0L
+                        progress >= 1f -> book.durationMs
+                        else -> book.currentPositionMs // Keep existing position for partial progress updates
+                    }
+                } else {
+                    book.currentPositionMs
+                }
+                
+                val updatedBook = book.copy(
+                    progress = progress.coerceIn(0f, 1f),
+                    currentPositionMs = updatedCurrentPosition,
+                    lastReadTimestamp = System.currentTimeMillis(),
+                    explicitReadingStatus = status
+                )
+                updatedBook
+            } else {
+                book
+            }
+        }
+        
+        _books.value = updatedBooks
+        
+        // Update the book in the database
+        scope.launch { 
+            val updatedBook = updatedBooks.find { it.id == bookId }
+            if (updatedBook != null) {
+                bookRepository.updateBook(updatedBook)
+                android.util.Log.d("LibraryManager", "Updated book status and progress in database: ${updatedBook.title} -> status: ${updatedBook.explicitReadingStatus}, progress: ${updatedBook.progress}")
+            }
+        }
+    }
+
     fun updateBookProgressDirect(bookId: String, progress: Float) {
         val updatedBooks = _books.value.map { book ->
             if (book.id == bookId) {
@@ -1206,11 +1238,24 @@ class LibraryManager(
                     else -> book.explicitReadingStatus
                 }
                 
-                book.copy(
+                // For audiobooks, also update currentPositionMs to match progress
+                val updatedCurrentPosition = if (book.isAudiobook()) {
+                    when {
+                        progress == 0f -> 0L
+                        progress >= 1f -> book.durationMs
+                        else -> book.currentPositionMs // Keep existing position for partial progress updates
+                    }
+                } else {
+                    book.currentPositionMs
+                }
+                
+                val updatedBook = book.copy(
                     progress = progress.coerceIn(0f, 1f),
+                    currentPositionMs = updatedCurrentPosition,
                     lastReadTimestamp = System.currentTimeMillis(),
                     explicitReadingStatus = newStatus
                 )
+                updatedBook
             } else {
                 book
             }

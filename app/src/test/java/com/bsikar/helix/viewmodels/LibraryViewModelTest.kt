@@ -88,7 +88,7 @@ class LibraryViewModelTest {
         // Verify initial state
         assertEquals("", viewModel.searchQuery.value)
         assertEquals(false, viewModel.readingSortAscending.value)
-        assertEquals(true, viewModel.planToReadSortAscending.value)
+        assertEquals(true, viewModel.onDeckSortAscending.value)
         assertEquals(true, viewModel.completedSortAscending.value)
     }
 
@@ -129,11 +129,11 @@ class LibraryViewModelTest {
 
     @Test
     fun `togglePlanToReadSortOrder should toggle sort direction`() = runTest {
-        val initialSort = viewModel.planToReadSortAscending.value
+        val initialSort = viewModel.onDeckSortAscending.value
         
-        viewModel.togglePlanToReadSortOrder()
+        viewModel.toggleOnDeckSortOrder()
         
-        assertEquals(!initialSort, viewModel.planToReadSortAscending.value)
+        assertEquals(!initialSort, viewModel.onDeckSortAscending.value)
     }
 
     @Test
@@ -186,15 +186,15 @@ class LibraryViewModelTest {
     fun `sorting state management should work correctly`() = runTest {
         // Test initial state
         assertEquals(false, viewModel.readingSortAscending.value)
-        assertEquals(true, viewModel.planToReadSortAscending.value)
+        assertEquals(true, viewModel.onDeckSortAscending.value)
         assertEquals(true, viewModel.completedSortAscending.value)
         
         // Test toggling
         viewModel.toggleReadingSortOrder()
         assertEquals(true, viewModel.readingSortAscending.value)
         
-        viewModel.togglePlanToReadSortOrder()
-        assertEquals(false, viewModel.planToReadSortAscending.value)
+        viewModel.toggleOnDeckSortOrder()
+        assertEquals(false, viewModel.onDeckSortAscending.value)
         
         viewModel.toggleCompletedSortOrder()
         assertEquals(false, viewModel.completedSortAscending.value)

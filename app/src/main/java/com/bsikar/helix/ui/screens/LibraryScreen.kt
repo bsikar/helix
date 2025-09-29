@@ -20,9 +20,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
+import coil.compose.AsyncImage
 import com.bsikar.helix.R
 import com.bsikar.helix.data.model.Book
+import com.bsikar.helix.data.model.ReadingStatus
 import com.bsikar.helix.data.model.UiState
+import com.bsikar.helix.viewmodels.AudioBookReaderViewModel
 import com.bsikar.helix.data.ImportProgress
 import com.bsikar.helix.data.LibraryManager
 import com.bsikar.helix.theme.AppTheme
@@ -37,7 +42,6 @@ import com.bsikar.helix.ui.components.WindowSizeClass
 import com.bsikar.helix.ui.components.ImportProgressIndicator
 import com.bsikar.helix.ui.components.CompactImportProgress
 import com.bsikar.helix.managers.ImportManager
-// SearchUtils no longer needed - search logic moved to ViewModel
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -49,18 +53,21 @@ fun LibraryScreen(
     onThemeChange: (ThemeMode) -> Unit,
     theme: AppTheme,
     readingBooks: List<com.bsikar.helix.data.model.Book>,
-    planToReadBooks: List<com.bsikar.helix.data.model.Book>,
+    onDeckBooks: List<com.bsikar.helix.data.model.Book>,
     completedBooks: List<com.bsikar.helix.data.model.Book>,
+    allBooks: List<com.bsikar.helix.data.model.Book>,
+    currentlyPlayingAudiobook: Book? = null,
     onNavigateToSettings: () -> Unit = {},
     onNavigateToProgressSettings: () -> Unit = {},
     onBookClick: (Book) -> Unit = {},
     onSeeAllClick: (String, List<com.bsikar.helix.data.model.Book>) -> Unit = { _, _ -> },
     onStartReading: (String) -> Unit = {},
     onMarkCompleted: (String) -> Unit = {},
-    onMoveToPlanToRead: (String) -> Unit = {},
+    onMoveToOnDeck: (String) -> Unit = {},
     onSetProgress: (String, Float) -> Unit = { _, _ -> },
     onEditTags: (String, List<String>) -> Unit = { _, _ -> },
     onUpdateBookSettings: (com.bsikar.helix.data.model.Book) -> Unit = { _ -> },
+    onRemoveFromLibrary: (String) -> Unit = { _ -> },
     libraryManager: LibraryManager? = null,
     libraryState: UiState<List<com.bsikar.helix.data.model.Book>> = UiState.Success(emptyList()),
     errorMessage: String? = null,
@@ -69,10 +76,10 @@ fun LibraryScreen(
     importManager: ImportManager? = null,
     // Sorting states and functions
     readingSortAscending: Boolean = false,
-    planToReadSortAscending: Boolean = true,
+    onDeckSortAscending: Boolean = true,
     completedSortAscending: Boolean = true,
     onToggleReadingSort: () -> Unit = {},
-    onTogglePlanToReadSort: () -> Unit = {},
+    onToggleOnDeckSort: () -> Unit = {},
     onToggleCompletedSort: () -> Unit = {},
     onRefresh: () -> Unit = {}
 ) {
@@ -87,16 +94,16 @@ fun LibraryScreen(
     // Create mutable internal lists to allow book updates
     // Use keys that include order to ensure recomposition when sorting changes
     val readingBooksKey = remember(readingBooks.size, readingSortAscending) { readingBooks.map { it.id }.joinToString(",") }
-    val planToReadBooksKey = remember(planToReadBooks.size, planToReadSortAscending) { planToReadBooks.map { it.id }.joinToString(",") }
+    val onDeckBooksKey = remember(onDeckBooks.size, onDeckSortAscending) { onDeckBooks.map { it.id }.joinToString(",") }
     val completedBooksKey = remember(completedBooks.size, completedSortAscending) { completedBooks.map { it.id }.joinToString(",") }
     
     var internalReadingBooks by remember(readingBooksKey) { mutableStateOf(readingBooks) }
-    var internalPlanToReadBooks by remember(planToReadBooksKey) { mutableStateOf(planToReadBooks) }
+    var internalOnDeckBooks by remember(onDeckBooksKey) { mutableStateOf(onDeckBooks) }
     var internalCompletedBooks by remember(completedBooksKey) { mutableStateOf(completedBooks) }
     
     // Sync internal lists when source lists change (including sorting changes)
     LaunchedEffect(readingBooksKey) { internalReadingBooks = readingBooks }
-    LaunchedEffect(planToReadBooksKey) { internalPlanToReadBooks = planToReadBooks }
+    LaunchedEffect(onDeckBooksKey) { internalOnDeckBooks = onDeckBooks }
     LaunchedEffect(completedBooksKey) { internalCompletedBooks = completedBooks }
     
     // Function to update a book in the appropriate list
@@ -107,7 +114,7 @@ fun LibraryScreen(
         }
         
         // Update in plan to read books
-        internalPlanToReadBooks = internalPlanToReadBooks.map { book ->
+        internalOnDeckBooks = internalOnDeckBooks.map { book ->
             if (book.id == updatedBook.id) updatedBook else book
         }
         
@@ -161,10 +168,11 @@ fun LibraryScreen(
                     onBookClick = onBookClick,
                     onStartReading = onStartReading,
                     onMarkCompleted = onMarkCompleted,
-                    onMoveToPlanToRead = onMoveToPlanToRead,
+                    onMoveToOnDeck = onMoveToOnDeck,
                     onSetProgress = onSetProgress,
                     onEditTags = onEditTags,
-                    onUpdateBookSettings = updateBookInLists
+                    onUpdateBookSettings = updateBookInLists,
+                    onRemoveFromLibrary = onRemoveFromLibrary
                 )
             }
             WindowSizeClass.MEDIUM, WindowSizeClass.EXPANDED -> {
@@ -181,13 +189,15 @@ fun LibraryScreen(
                             theme = theme,
                             searchQuery = searchQuery,
                             config = responsiveConfig,
+                            isBrowseMode = false,
                             onBookClick = onBookClick,
                             onStartReading = onStartReading,
                             onMarkCompleted = onMarkCompleted,
-                            onMoveToPlanToRead = onMoveToPlanToRead,
+                            onMoveToOnDeck = onMoveToOnDeck,
                             onSetProgress = onSetProgress,
                             onEditTags = onEditTags,
-                            onUpdateBookSettings = updateBookInLists
+                            onUpdateBookSettings = updateBookInLists,
+                            onRemoveFromLibrary = onRemoveFromLibrary
                         )
                     }
                 }
@@ -405,52 +415,87 @@ fun LibraryScreen(
             }
             
 
-            // Always show Reading section
-            item(key = "reading_header") {
-                LibrarySectionHeader(
-                    title = "Reading",
-                    subtitle = "Last read",
-                    theme = theme,
-                    isAscending = readingSortAscending,
-                    onSortClick = onToggleReadingSort,
-                    onSeeAllClick = { onSeeAllClick("Reading", internalReadingBooks) }
-                )
-            }
-            if (internalReadingBooks.isNotEmpty()) {
-                item(key = "reading_books_${internalReadingBooks.size}") {
+            // Reading section (text-based books) - only show if there are books currently being read
+            val textBooks = internalReadingBooks.filter { !it.isAudiobook() }
+            
+            if (textBooks.isNotEmpty()) {
+                item(key = "reading_header") {
+                    LibrarySectionHeader(
+                        title = "Reading",
+                        subtitle = "Last read",
+                        theme = theme,
+                        isAscending = readingSortAscending,
+                        onSortClick = onToggleReadingSort,
+                        onSeeAllClick = { onSeeAllClick("Reading", textBooks) }
+                    )
+                }
+                item(key = "reading_books_${textBooks.size}") {
                     ResponsiveBookSection(
-                        books = internalReadingBooks,
+                        books = textBooks,
                         showProgress = true
                     )
                 }
-            } else {
-                item(key = "reading_empty") {
-                    Text(
-                        text = "No books currently being read.\nStart reading a book from your 'Plan to Read' list!",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        textAlign = TextAlign.Center,
-                        color = theme.secondaryTextColor,
-                        fontSize = 14.sp
+            }
+            
+            // Listening section (audiobooks) - show audiobooks that are being listened to
+            val listeningBooks = allBooks.filter { 
+                it.isAudiobook() && it.readingStatus == ReadingStatus.LISTENING
+            }.sortedByDescending { it.lastReadTimestamp }
+            val audioBooks = allBooks.filter { it.isAudiobook() }
+            
+            // Show listening section if there's a currently playing audiobook OR other listening books
+            val hasListeningContent = currentlyPlayingAudiobook != null || listeningBooks.isNotEmpty()
+            
+            if (hasListeningContent) {
+                item(key = "listening_header") {
+                    LibrarySectionHeader(
+                        title = "Listening",
+                        subtitle = "Last played",
+                        theme = theme,
+                        isAscending = false,
+                        onSortClick = { },
+                        onSeeAllClick = { onSeeAllClick("Listening", audioBooks) }
                     )
+                }
+                
+                // Show currently playing audiobook if available
+                currentlyPlayingAudiobook?.let { book ->
+                    item(key = "currently_playing") {
+                        CurrentlyPlayingCard(
+                            book = book,
+                            theme = theme,
+                            onBookClick = onBookClick,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                    }
+                }
+                
+                // Show other listening books (excluding the currently playing one)
+                val otherListeningBooks = listeningBooks.filter { it.id != currentlyPlayingAudiobook?.id }
+                if (otherListeningBooks.isNotEmpty()) {
+                    item(key = "listening_books_${otherListeningBooks.size}") {
+                        ResponsiveBookSection(
+                            books = otherListeningBooks,
+                            showProgress = true
+                        )
+                    }
                 }
             }
 
-            if (internalPlanToReadBooks.isNotEmpty()) {
+            if (internalOnDeckBooks.isNotEmpty()) {
                 item(key = "plan_to_read_header") {
                     LibrarySectionHeader(
-                        title = "Plan to read",
+                        title = "On Deck",
                         subtitle = "Title",
                         theme = theme,
-                        isAscending = planToReadSortAscending,
-                        onSortClick = onTogglePlanToReadSort,
-                        onSeeAllClick = { onSeeAllClick("Plan to read", internalPlanToReadBooks) }
+                        isAscending = onDeckSortAscending,
+                        onSortClick = onToggleOnDeckSort,
+                        onSeeAllClick = { onSeeAllClick("On Deck", internalOnDeckBooks) }
                     )
                 }
-                item(key = "plan_to_read_books_${internalPlanToReadBooks.size}") {
+                item(key = "on_deck_books_${internalOnDeckBooks.size}") {
                     ResponsiveBookSection(
-                        books = internalPlanToReadBooks,
+                        books = internalOnDeckBooks,
                         showProgress = false
                     )
                 }
@@ -459,12 +504,12 @@ fun LibraryScreen(
             if (internalCompletedBooks.isNotEmpty()) {
                 item(key = "read_header") {
                     LibrarySectionHeader(
-                        title = "Read",
+                        title = "Finished",
                         subtitle = "Title",
                         theme = theme,
                         isAscending = completedSortAscending,
                         onSortClick = onToggleCompletedSort,
-                        onSeeAllClick = { onSeeAllClick("Read", internalCompletedBooks) }
+                        onSeeAllClick = { onSeeAllClick("Finished", internalCompletedBooks) }
                     )
                 }
                 item(key = "read_books_${internalCompletedBooks.size}") {
@@ -475,16 +520,39 @@ fun LibraryScreen(
                 }
             }
 
-            if (internalReadingBooks.isEmpty() && internalPlanToReadBooks.isEmpty() && internalCompletedBooks.isEmpty()) {
+            // Show overall empty state only if no books exist at all
+            if (allBooks.isEmpty()) {
                 item(key = "no_books_found") {
-                    Text(
-                        text = "No books found.",
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .padding(horizontal = 24.dp)
                             .padding(top = 48.dp),
-                        textAlign = TextAlign.Center,
-                        color = theme.secondaryTextColor
-                    )
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.LibraryBooks,
+                            contentDescription = "Empty library",
+                            modifier = Modifier.size(64.dp),
+                            tint = theme.secondaryTextColor.copy(alpha = 0.6f)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Your library is empty",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = theme.primaryTextColor,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Import your books and audiobooks to get started.\nSupported formats: EPUB, M4B",
+                            fontSize = 14.sp,
+                            color = theme.secondaryTextColor,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 20.sp
+                        )
+                    }
                 }
             }
                     }
@@ -555,6 +623,107 @@ fun LibrarySectionHeader(
                 text = "See All",
                 fontSize = 13.sp,
                 color = theme.accentColor
+            )
+        }
+    }
+}
+
+@Composable
+fun CurrentlyPlayingCard(
+    book: Book,
+    theme: AppTheme,
+    onBookClick: (Book) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable { onBookClick(book) },
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = theme.accentColor.copy(alpha = 0.1f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Cover art
+            Card(
+                modifier = Modifier
+                    .size(60.dp),
+                shape = RoundedCornerShape(8.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (book.shouldShowCoverArt() && !book.coverImagePath.isNullOrBlank()) {
+                        Color.Transparent
+                    } else {
+                        book.getEffectiveCoverColor()
+                    }
+                )
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (book.shouldShowCoverArt() && !book.coverImagePath.isNullOrBlank()) {
+                        AsyncImage(
+                            model = book.coverImagePath,
+                            contentDescription = "Cover",
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(8.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.AudioFile,
+                            contentDescription = null,
+                            modifier = Modifier.size(30.dp),
+                            tint = Color.White.copy(alpha = 0.9f)
+                        )
+                    }
+                }
+            }
+            
+            Spacer(modifier = Modifier.width(16.dp))
+            
+            // Book info
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = "Now Playing",
+                    fontSize = 12.sp,
+                    color = theme.accentColor,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = book.title,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = theme.primaryTextColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = book.author,
+                    fontSize = 14.sp,
+                    color = theme.secondaryTextColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            
+            // Play indicator
+            Icon(
+                Icons.Default.PlayArrow,
+                contentDescription = "Playing",
+                tint = theme.accentColor,
+                modifier = Modifier.size(24.dp)
             )
         }
     }

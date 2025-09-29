@@ -1,13 +1,21 @@
 package com.bsikar.helix.ui.screens
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
@@ -19,10 +27,14 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay30
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -39,6 +51,7 @@ import com.bsikar.helix.data.model.Book
 import com.bsikar.helix.data.model.AudioChapter
 import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.ui.components.AudioChapterNavigationSheet
+import com.bsikar.helix.ui.components.SmoothProgressBar
 import com.bsikar.helix.viewmodels.AudioBookReaderViewModel
 import kotlinx.coroutines.launch
 
@@ -59,8 +72,6 @@ fun AudioBookReaderScreen(
     var showChapterList by remember { mutableStateOf(false) }
     var showSpeedDialog by remember { mutableStateOf(false) }
     var showSleepTimer by remember { mutableStateOf(false) }
-    var sliderPosition by remember { mutableFloatStateOf(0f) }
-    var isSliderBeingDragged by remember { mutableStateOf(false) }
     
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
@@ -69,91 +80,137 @@ fun AudioBookReaderScreen(
         viewModel.loadBook(book)
     }
     
-    LaunchedEffect(playbackState.currentPositionMs) {
-        if (!isSliderBeingDragged) {
-            sliderPosition = playbackState.currentPositionMs.toFloat()
-        }
-    }
-    
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(theme.backgroundColor)
-            .verticalScroll(scrollState)
-    ) {
-        // Top App Bar
-        TopAppBar(
-            title = {
-                Text(
-                    text = book.title,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = theme.primaryTextColor
+    Scaffold(
+        containerColor = theme.backgroundColor,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = book.title,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = theme.primaryTextColor
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBackClick) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = theme.primaryTextColor
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { showChapterList = true }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.List,
+                            contentDescription = "Chapters",
+                            tint = theme.primaryTextColor
+                        )
+                    }
+                    IconButton(onClick = { showSleepTimer = true }) {
+                        Icon(
+                            Icons.Default.Bedtime,
+                            contentDescription = "Sleep Timer",
+                            tint = theme.primaryTextColor
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = theme.surfaceColor,
+                    titleContentColor = theme.primaryTextColor
                 )
-            },
-            navigationIcon = {
-                IconButton(onClick = onBackClick) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = theme.primaryTextColor
-                    )
-                }
-            },
-            actions = {
-                IconButton(onClick = { showChapterList = true }) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.List,
-                        contentDescription = "Chapters",
-                        tint = theme.primaryTextColor
-                    )
-                }
-                IconButton(onClick = { showSleepTimer = true }) {
-                    Icon(
-                        Icons.Default.Bedtime,
-                        contentDescription = "Sleep Timer",
-                        tint = theme.primaryTextColor
-                    )
-                }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = theme.backgroundColor
             )
-        )
+        }
+    ) { innerPadding ->
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
+            // Gradient background for better visual appeal
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.4f)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                book.getEffectiveCoverColor().copy(alpha = 0.3f),
+                                theme.backgroundColor
+                            )
+                        )
+                    )
+            )
+            
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(scrollState)
+            ) {
         
         Spacer(modifier = Modifier.height(24.dp))
         
-        // Cover Art
+        // Cover Art with enhanced design
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(300.dp)
-                .padding(horizontal = 32.dp),
+                .height(320.dp)
+                .padding(horizontal = 48.dp),
             contentAlignment = Alignment.Center
         ) {
-            if (book.shouldShowCoverArt() && !book.coverImagePath.isNullOrBlank()) {
-                AsyncImage(
-                    model = book.coverImagePath,
-                    contentDescription = "Cover",
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(16.dp)),
-                    contentScale = ContentScale.Fit
+            Card(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .shadow(
+                        elevation = 12.dp,
+                        shape = RoundedCornerShape(20.dp),
+                        ambientColor = book.getEffectiveCoverColor().copy(alpha = 0.3f),
+                        spotColor = book.getEffectiveCoverColor().copy(alpha = 0.3f)
+                    ),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (book.shouldShowCoverArt() && !book.coverImagePath.isNullOrBlank()) {
+                        Color.Transparent
+                    } else {
+                        book.getEffectiveCoverColor()
+                    }
                 )
-            } else {
+            ) {
                 Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(book.getEffectiveCoverColor()),
+                    modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        Icons.Default.AudioFile,
-                        contentDescription = null,
-                        modifier = Modifier.size(64.dp),
-                        tint = Color.White.copy(alpha = 0.7f)
-                    )
+                    if (book.shouldShowCoverArt() && !book.coverImagePath.isNullOrBlank()) {
+                        AsyncImage(
+                            model = book.coverImagePath,
+                            contentDescription = "Cover",
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(20.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                Icons.Default.AudioFile,
+                                contentDescription = null,
+                                modifier = Modifier.size(80.dp),
+                                tint = Color.White.copy(alpha = 0.9f)
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "AUDIOBOOK",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color.White.copy(alpha = 0.7f),
+                                letterSpacing = 2.sp
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -188,44 +245,43 @@ fun AudioBookReaderScreen(
             
             Spacer(modifier = Modifier.height(16.dp))
             
-            // Current Chapter
+            // Current Chapter with enhanced design
             playbackState.currentChapter?.let { chapter ->
-                Text(
-                    text = chapter.title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = theme.primaryTextColor.copy(alpha = 0.8f),
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Card(
+                    modifier = Modifier.fillMaxWidth(0.8f),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = theme.surfaceColor.copy(alpha = 0.3f)
+                    )
+                ) {
+                    Text(
+                        text = chapter.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = theme.primaryTextColor.copy(alpha = 0.8f),
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                }
             }
         }
         
         Spacer(modifier = Modifier.height(32.dp))
         
-        // Progress Slider
+        // Smooth Progress Bar for Audiobooks
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp)
         ) {
-            Slider(
-                value = sliderPosition,
-                onValueChange = { 
-                    sliderPosition = it
-                    isSliderBeingDragged = true
-                },
-                onValueChangeFinished = {
-                    viewModel.seekTo(sliderPosition.toLong())
-                    isSliderBeingDragged = false
-                },
-                valueRange = 0f..playbackState.durationMs.toFloat(),
-                modifier = Modifier.fillMaxWidth(),
-                colors = SliderDefaults.colors(
-                    thumbColor = theme.accentColor,
-                    activeTrackColor = theme.accentColor,
-                    inactiveTrackColor = theme.secondaryTextColor.copy(alpha = 0.3f)
-                )
+            SmoothProgressBar(
+                currentPosition = playbackState.currentPositionMs,
+                duration = playbackState.durationMs,
+                theme = theme,
+                onSeek = { position -> viewModel.seekTo(position) }
             )
             
             Row(
@@ -233,7 +289,7 @@ fun AudioBookReaderScreen(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = formatTime(if (isSliderBeingDragged) sliderPosition.toLong() else playbackState.currentPositionMs),
+                    text = formatTime(playbackState.currentPositionMs),
                     style = MaterialTheme.typography.bodySmall,
                     color = theme.primaryTextColor.copy(alpha = 0.7f)
                 )
@@ -247,7 +303,7 @@ fun AudioBookReaderScreen(
         
         Spacer(modifier = Modifier.height(32.dp))
         
-        // Control Buttons
+        // Control Buttons with enhanced animations
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -255,6 +311,11 @@ fun AudioBookReaderScreen(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            val buttonElevation by animateDpAsState(
+                targetValue = if (playbackState.isPlaying) 8.dp else 4.dp,
+                animationSpec = tween(300),
+                label = "button_elevation"
+            )
             // Previous Chapter
             IconButton(
                 onClick = { viewModel.previousChapter() },
@@ -281,11 +342,22 @@ fun AudioBookReaderScreen(
                 )
             }
             
-            // Play/Pause
+            // Play/Pause with animation
             FloatingActionButton(
                 onClick = { viewModel.togglePlayPause() },
-                modifier = Modifier.size(72.dp),
-                containerColor = theme.accentColor,
+                modifier = Modifier
+                    .size(72.dp)
+                    .shadow(
+                        elevation = buttonElevation,
+                        shape = CircleShape,
+                        ambientColor = theme.accentColor.copy(alpha = 0.3f),
+                        spotColor = theme.accentColor.copy(alpha = 0.3f)
+                    ),
+                containerColor = animateColorAsState(
+                    targetValue = if (playbackState.isPlaying) theme.accentColor else theme.accentColor.copy(alpha = 0.9f),
+                    animationSpec = tween(300),
+                    label = "play_button_color"
+                ).value,
                 contentColor = Color.White
             ) {
                 Icon(
@@ -324,122 +396,294 @@ fun AudioBookReaderScreen(
         
         Spacer(modifier = Modifier.height(24.dp))
         
-        // Secondary Controls
+        // Secondary Controls with enhanced design
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp),
-            horizontalArrangement = Arrangement.Center
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            // Playback Speed
-            OutlinedButton(
-                onClick = { showSpeedDialog = true },
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = theme.primaryTextColor
+            // Playback Speed with better visual
+            Card(
+                modifier = Modifier
+                    .clickable { showSpeedDialog = true },
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = theme.surfaceColor.copy(alpha = 0.5f)
                 )
             ) {
-                Text("${playbackState.playbackSpeed}x")
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Speed,
+                        contentDescription = "Speed",
+                        modifier = Modifier.size(20.dp),
+                        tint = theme.primaryTextColor
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "${playbackState.playbackSpeed}x",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = theme.primaryTextColor
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.width(16.dp))
+            
+            // Sleep timer indicator if active
+            if (sleepTimerMinutes != null) {
+                Card(
+                    modifier = Modifier
+                        .clickable { showSleepTimer = true },
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = theme.accentColor.copy(alpha = 0.2f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Bedtime,
+                            contentDescription = "Sleep Timer",
+                            modifier = Modifier.size(20.dp),
+                            tint = theme.accentColor
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            formatSleepTime(sleepTimerSecondsRemaining),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = theme.accentColor
+                        )
+                    }
+                }
             }
         }
         
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(32.dp))
+            }
+        }
     }
     
-    // Speed Selection Dialog
+    // Enhanced Speed Selection Dialog
     if (showSpeedDialog) {
         AlertDialog(
             onDismissRequest = { showSpeedDialog = false },
-            title = { Text("Playback Speed") },
+            containerColor = theme.surfaceColor,
+            titleContentColor = theme.primaryTextColor,
+            textContentColor = theme.primaryTextColor,
+            title = { 
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Speed,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp),
+                        tint = theme.accentColor
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        "Playback Speed",
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                }
+            },
             text = {
-                Column {
-                    listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { speed ->
-                        Row(
+                Column(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f).forEach { speed ->
+                        Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickableWithoutRipple {
+                                .padding(vertical = 4.dp)
+                                .clickable {
                                     viewModel.setPlaybackSpeed(speed)
                                     showSpeedDialog = false
-                                }
-                                .padding(vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                                },
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (playbackState.playbackSpeed == speed) 
+                                    theme.accentColor.copy(alpha = 0.2f) 
+                                else 
+                                    theme.backgroundColor
+                            ),
+                            shape = RoundedCornerShape(8.dp)
                         ) {
-                            RadioButton(
-                                selected = playbackState.playbackSpeed == speed,
-                                onClick = {
-                                    viewModel.setPlaybackSpeed(speed)
-                                    showSpeedDialog = false
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "${speed}x",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = if (playbackState.playbackSpeed == speed) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (playbackState.playbackSpeed == speed) theme.accentColor else theme.primaryTextColor
+                                )
+                                if (playbackState.playbackSpeed == speed) {
+                                    Icon(
+                                        Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        modifier = Modifier.size(20.dp),
+                                        tint = theme.accentColor
+                                    )
                                 }
-                            )
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Text("${speed}x")
+                            }
                         }
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showSpeedDialog = false }) {
-                    Text("Close")
+                TextButton(
+                    onClick = { showSpeedDialog = false },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = theme.accentColor
+                    )
+                ) {
+                    Text("Done")
                 }
             }
         )
     }
     
-    // Sleep Timer Dialog
+    // Enhanced Sleep Timer Dialog
     if (showSleepTimer) {
         AlertDialog(
             onDismissRequest = { showSleepTimer = false },
+            containerColor = theme.surfaceColor,
+            titleContentColor = theme.primaryTextColor,
+            textContentColor = theme.primaryTextColor,
             title = { 
-                Text(
-                    if (sleepTimerMinutes != null) 
-                        "Sleep Timer (${formatSleepTime(sleepTimerSecondsRemaining)})"
-                    else 
-                        "Set Sleep Timer"
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Bedtime,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp),
+                        tint = theme.accentColor
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        if (sleepTimerMinutes != null) 
+                            "Sleep Timer Active"
+                        else 
+                            "Set Sleep Timer",
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                }
             },
             text = {
-                Column {
+                Column(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     if (sleepTimerMinutes != null) {
-                        Text("Timer will stop playback in ${formatSleepTime(sleepTimerSecondsRemaining)}")
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Row(
+                        Card(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly
+                            colors = CardDefaults.cardColors(
+                                containerColor = theme.accentColor.copy(alpha = 0.1f)
+                            ),
+                            shape = RoundedCornerShape(12.dp)
                         ) {
-                            OutlinedButton(onClick = {
-                                viewModel.cancelSleepTimer()
-                                showSleepTimer = false
-                            }) {
-                                Text("Cancel Timer")
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    "Timer Active",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = theme.accentColor
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    formatSleepTime(sleepTimerSecondsRemaining),
+                                    style = MaterialTheme.typography.displaySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = theme.primaryTextColor
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Button(
+                                    onClick = {
+                                        viewModel.cancelSleepTimer()
+                                        showSleepTimer = false
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = theme.accentColor
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Cancel Timer")
+                                }
                             }
                         }
                     } else {
-                        listOf(5, 10, 15, 30, 45, 60).forEach { minutes ->
-                            Row(
+                        listOf(5, 10, 15, 30, 45, 60, 90).forEach { minutes ->
+                            Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickableWithoutRipple {
+                                    .padding(vertical = 4.dp)
+                                    .clickable {
                                         viewModel.setSleepTimer(minutes)
                                         showSleepTimer = false
-                                    }
-                                    .padding(vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                    },
+                                colors = CardDefaults.cardColors(
+                                    containerColor = theme.backgroundColor
+                                ),
+                                shape = RoundedCornerShape(8.dp)
                             ) {
-                                RadioButton(
-                                    selected = false,
-                                    onClick = {
-                                        viewModel.setSleepTimer(minutes)
-                                        showSleepTimer = false
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Timer,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(20.dp),
+                                            tint = theme.secondaryTextColor
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(
+                                            text = "$minutes minutes",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = theme.primaryTextColor
+                                        )
                                     }
-                                )
-                                Spacer(modifier = Modifier.width(16.dp))
-                                Text("$minutes minutes")
+                                    Text(
+                                        text = if (minutes < 60) "$minutes min" else "${minutes/60}h ${minutes%60}m",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = theme.secondaryTextColor
+                                    )
+                                }
                             }
                         }
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showSleepTimer = false }) {
+                TextButton(
+                    onClick = { showSleepTimer = false },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = theme.accentColor
+                    )
+                ) {
                     Text("Close")
                 }
             }

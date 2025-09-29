@@ -278,13 +278,15 @@ fun ResponsiveBookCard(
     theme: com.bsikar.helix.theme.AppTheme,
     searchQuery: String = "",
     config: ResponsiveConfig = ResponsiveConfig.fromScreenWidth(),
+    isBrowseMode: Boolean = false,
     onBookClick: (com.bsikar.helix.data.model.Book) -> Unit = {},
     onStartReading: (String) -> Unit = {},
     onMarkCompleted: (String) -> Unit = {},
-    onMoveToPlanToRead: (String) -> Unit = {},
+    onMoveToOnDeck: (String) -> Unit = {},
     onSetProgress: (String, Float) -> Unit = { _, _ -> },
     onEditTags: (String, List<String>) -> Unit = { _, _ -> },
-    onUpdateBookSettings: (com.bsikar.helix.data.model.Book) -> Unit = { _ -> }
+    onUpdateBookSettings: (com.bsikar.helix.data.model.Book) -> Unit = { _ -> },
+    onRemoveFromLibrary: (String) -> Unit = { _ -> }
 ) {
     // Adjust card width based on grid configuration
     val cardWidth = when {
@@ -298,12 +300,14 @@ fun ResponsiveBookCard(
         showProgress = showProgress,
         theme = theme,
         searchQuery = searchQuery,
+        isBrowseMode = isBrowseMode,
         onBookClick = onBookClick,
         onStartReading = onStartReading,
         onMarkCompleted = onMarkCompleted,
-        onMoveToPlanToRead = onMoveToPlanToRead,
+        onMoveToOnDeck = onMoveToOnDeck,
         onSetProgress = onSetProgress,
         onEditTags = onEditTags,
-        onUpdateBookSettings = onUpdateBookSettings
+        onUpdateBookSettings = onUpdateBookSettings,
+        onRemoveFromLibrary = onRemoveFromLibrary
     )
 }

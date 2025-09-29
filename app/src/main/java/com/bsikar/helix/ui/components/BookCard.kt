@@ -1,5 +1,6 @@
 package com.bsikar.helix.ui.components
 
+import android.util.Log
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -7,6 +8,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -34,21 +36,32 @@ fun BookCard(
     showProgress: Boolean, 
     theme: AppTheme,
     searchQuery: String = "",
+    isBrowseMode: Boolean = false,
     onBookClick: (Book) -> Unit = {},
     onStartReading: (String) -> Unit = {},
     onMarkCompleted: (String) -> Unit = {},
-    onMoveToPlanToRead: (String) -> Unit = {},
+    onMoveToOnDeck: (String) -> Unit = {},
     onSetProgress: (String, Float) -> Unit = { _, _ -> },
     onEditTags: (String, List<String>) -> Unit = { _, _ -> },
-    onUpdateBookSettings: (Book) -> Unit = { _ -> }
+    onUpdateBookSettings: (Book) -> Unit = { _ -> },
+    onRemoveFromLibrary: (String) -> Unit = { _ -> }
 ) {
     var showContextMenu by remember { mutableStateOf(false) }
     var showTagEditor by remember { mutableStateOf(false) }
     var showBookSettings by remember { mutableStateOf(false) }
     
+    // Make audiobook cards visually distinct and smaller
+    val cardWidth = if (book.isAudiobook()) {
+        if (showProgress) 110.dp else 100.dp
+    } else {
+        if (showProgress) 120.dp else 110.dp
+    }
+    
+    val aspectRatio = if (book.isAudiobook()) 0.75f else 0.68f // More square for audiobooks
+    
     Column(
         modifier = Modifier
-            .width(if (showProgress) 120.dp else 110.dp)
+            .width(cardWidth)
             .combinedClickable(
                 onClick = { onBookClick(book) },
                 onLongClick = { showContextMenu = true }
@@ -56,36 +69,63 @@ fun BookCard(
     ) {
         Box(
             modifier = Modifier
-                .aspectRatio(0.68f)
-                .clip(RoundedCornerShape(8.dp))
-                .background(book.getEffectiveCoverColor())
+                .aspectRatio(aspectRatio)
+                .clip(RoundedCornerShape(if (book.isAudiobook()) 12.dp else 8.dp))
+                .background(
+                    // Always show a color background as fallback
+                    when (book.coverDisplayMode) {
+                        CoverDisplayMode.COLOR_ONLY -> book.getEffectiveCoverColor()
+                        CoverDisplayMode.AUTO -> {
+                            // Use user selected color or default
+                            val colorValue = book.userSelectedColor ?: book.coverColor
+                            Log.d("BookCard", "AUTO mode - userSelectedColor: ${book.userSelectedColor}, coverColor: ${book.coverColor}, using: $colorValue")
+                            try {
+                                val finalColor = Color(colorValue.toULong())
+                                Log.d("BookCard", "Final color: $finalColor")
+                                finalColor
+                            } catch (e: Exception) {
+                                Log.e("BookCard", "Error converting color $colorValue", e)
+                                Color(0xFF6B73FF)
+                            }
+                        }
+                        CoverDisplayMode.COVER_ART_ONLY -> {
+                            if (book.hasCoverArt()) {
+                                Color(0xFF424242) // Gray background for cover art
+                            } else {
+                                Color(0xFF424242) // Gray placeholder
+                            }
+                        }
+                    }
+                )
         ) {
-            // Display cover art if available and display mode allows it
-            if (book.shouldShowCoverArt() && !book.coverImagePath.isNullOrBlank()) {
+            // Display cover art when appropriate
+            if ((book.coverDisplayMode == CoverDisplayMode.AUTO && book.hasCoverArt()) || 
+                (book.coverDisplayMode == CoverDisplayMode.COVER_ART_ONLY && book.hasCoverArt())) {
+                val coverFile = File(book.coverImagePath!!)
+                Log.d("BookCard", "Attempting to load cover art: ${book.coverImagePath}, exists: ${coverFile.exists()}, size: ${if (coverFile.exists()) coverFile.length() else "N/A"}")
+                
                 AsyncImage(
-                    model = File(book.coverImagePath),
+                    model = coverFile,
                     contentDescription = "Book cover",
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
-                    fallback = null, // Fall back to background color when image fails
-                    error = null // Show background color on error
-                )
-            } else if (book.isAudiobook()) {
-                // Show audio icon for audiobooks without cover art
-                Icon(
-                    Icons.Filled.AudioFile,
-                    contentDescription = "Audiobook",
-                    modifier = Modifier
-                        .size(48.dp)
-                        .align(Alignment.Center),
-                    tint = Color.White.copy(alpha = 0.7f)
+                    onSuccess = {
+                        Log.d("BookCard", "Successfully loaded cover art for book: ${book.title}")
+                    },
+                    onError = { error ->
+                        Log.e("BookCard", "Failed to load cover art from ${book.coverImagePath}: ${error.result.throwable?.message}")
+                        Log.e("BookCard", "File exists: ${coverFile.exists()}, canRead: ${coverFile.canRead()}")
+                    }
                 )
             }
+            
             // Status indicator in top-right corner
             val statusColor = when (book.readingStatus) {
                 ReadingStatus.UNREAD -> Color.Transparent // No indicator for unread books
                 ReadingStatus.PLAN_TO_READ -> theme.secondaryTextColor.copy(alpha = 0.7f)
                 ReadingStatus.READING -> theme.accentColor
+                ReadingStatus.PLAN_TO_LISTEN -> theme.secondaryTextColor.copy(alpha = 0.7f)
+                ReadingStatus.LISTENING -> theme.accentColor
                 ReadingStatus.COMPLETED -> Color(0xFF4CAF50)
             }
             
@@ -93,26 +133,31 @@ fun BookCard(
                 ReadingStatus.UNREAD -> Icons.Filled.Circle // Placeholder, won't be shown due to transparent color
                 ReadingStatus.PLAN_TO_READ -> Icons.Filled.Schedule
                 ReadingStatus.READING -> Icons.Filled.PlayArrow
+                ReadingStatus.PLAN_TO_LISTEN -> Icons.Filled.Schedule
+                ReadingStatus.LISTENING -> Icons.AutoMirrored.Filled.VolumeUp
                 ReadingStatus.COMPLETED -> Icons.Filled.CheckCircle
             }
             
-            Box(
-                modifier = Modifier
-                    .size(20.dp)
-                    .align(Alignment.TopEnd)
-                    .offset(x = (-4).dp, y = 4.dp)
-                    .background(
-                        statusColor,
-                        RoundedCornerShape(10.dp)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = statusIcon,
-                    contentDescription = book.readingStatus.name,
-                    tint = Color.White,
-                    modifier = Modifier.size(12.dp)
-                )
+            // Only show status indicator for books that are not UNREAD
+            if (book.readingStatus != ReadingStatus.UNREAD) {
+                Box(
+                    modifier = Modifier
+                        .size(20.dp)
+                        .align(Alignment.TopEnd)
+                        .offset(x = (-4).dp, y = 4.dp)
+                        .background(
+                            statusColor,
+                            RoundedCornerShape(10.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = statusIcon,
+                        contentDescription = book.readingStatus.name,
+                        tint = Color.White,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
             }
             
             val effectiveProgress = if (book.isAudiobook()) book.getAudioProgress() else book.progress
@@ -169,25 +214,32 @@ fun BookCard(
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
         )
         
-        // Show audiobook info
+        // Show enhanced audiobook info
         if (book.isAudiobook()) {
-            Spacer(modifier = Modifier.height(2.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            Spacer(modifier = Modifier.height(4.dp))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(theme.accentColor.copy(alpha = 0.1f))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
             ) {
-                Icon(
-                    Icons.Filled.Headphones,
-                    contentDescription = "Audiobook",
-                    modifier = Modifier.size(10.dp),
-                    tint = theme.accentColor
-                )
-                Text(
-                    text = book.getFormattedDuration(),
-                    fontSize = 10.sp,
-                    color = theme.accentColor,
-                    fontWeight = FontWeight.Medium
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.Headphones,
+                        contentDescription = "Audiobook",
+                        modifier = Modifier.size(10.dp),
+                        tint = theme.accentColor
+                    )
+                    Text(
+                        text = book.getFormattedDuration(),
+                        fontSize = 10.sp,
+                        color = theme.accentColor,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
         
@@ -202,12 +254,12 @@ fun BookCard(
                         DropdownMenuItem(
                             text = { 
                                 Text(
-                                    "Add to Plan to Read",
+                                    "Add to On Deck",
                                     color = theme.primaryTextColor
                                 )
                             },
                             onClick = {
-                                onMoveToPlanToRead(book.id)
+                                onMoveToOnDeck(book.id)
                                 showContextMenu = false
                             },
                             leadingIcon = {
@@ -221,7 +273,7 @@ fun BookCard(
                         DropdownMenuItem(
                             text = { 
                                 Text(
-                                    "Start Reading",
+                                    if (book.isAudiobook()) "Start Listening" else "Start Reading",
                                     color = theme.primaryTextColor
                                 )
                             },
@@ -240,7 +292,7 @@ fun BookCard(
                         DropdownMenuItem(
                             text = { 
                                 Text(
-                                    "Mark as Read",
+                                    if (book.isAudiobook()) "Mark as Finished" else "Mark as Read",
                                     color = theme.primaryTextColor
                                 )
                             },
@@ -261,7 +313,7 @@ fun BookCard(
                         DropdownMenuItem(
                             text = { 
                                 Text(
-                                    "Start Reading",
+                                    if (book.isAudiobook()) "Start Listening" else "Start Reading",
                                     color = theme.primaryTextColor
                                 )
                             },
@@ -280,7 +332,7 @@ fun BookCard(
                         DropdownMenuItem(
                             text = { 
                                 Text(
-                                    "Mark as Read",
+                                    if (book.isAudiobook()) "Mark as Finished" else "Mark as Read",
                                     color = theme.primaryTextColor
                                 )
                             },
@@ -320,12 +372,92 @@ fun BookCard(
                         DropdownMenuItem(
                             text = { 
                                 Text(
-                                    "Move to Plan to Read",
+                                    "Move to On Deck",
                                     color = theme.primaryTextColor
                                 )
                             },
                             onClick = {
-                                onMoveToPlanToRead(book.id)
+                                onMoveToOnDeck(book.id)
+                                showContextMenu = false
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.Schedule,
+                                    contentDescription = null,
+                                    tint = theme.secondaryTextColor
+                                )
+                            }
+                        )
+                    }
+                    ReadingStatus.PLAN_TO_LISTEN -> {
+                        DropdownMenuItem(
+                            text = { 
+                                Text(
+                                    "Start Listening",
+                                    color = theme.primaryTextColor
+                                )
+                            },
+                            onClick = {
+                                onStartReading(book.id)
+                                showContextMenu = false
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.PlayArrow,
+                                    contentDescription = null,
+                                    tint = theme.accentColor
+                                )
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { 
+                                Text(
+                                    "Mark as Finished",
+                                    color = theme.primaryTextColor
+                                )
+                            },
+                            onClick = {
+                                onMarkCompleted(book.id)
+                                showContextMenu = false
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.CheckCircle,
+                                    contentDescription = null,
+                                    tint = Color(0xFF4CAF50)
+                                )
+                            }
+                        )
+                    }
+                    ReadingStatus.LISTENING -> {
+                        DropdownMenuItem(
+                            text = { 
+                                Text(
+                                    "Mark as Completed",
+                                    color = theme.primaryTextColor
+                                )
+                            },
+                            onClick = {
+                                onMarkCompleted(book.id)
+                                showContextMenu = false
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.CheckCircle,
+                                    contentDescription = null,
+                                    tint = theme.accentColor
+                                )
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { 
+                                Text(
+                                    "Move to On Deck",
+                                    color = theme.primaryTextColor
+                                )
+                            },
+                            onClick = {
+                                onMoveToOnDeck(book.id)
                                 showContextMenu = false
                             },
                             leadingIcon = {
@@ -341,12 +473,12 @@ fun BookCard(
                         DropdownMenuItem(
                             text = { 
                                 Text(
-                                    "Move to Plan to Read",
+                                    "Move to On Deck",
                                     color = theme.primaryTextColor
                                 )
                             },
                             onClick = {
-                                onMoveToPlanToRead(book.id)
+                                onMoveToOnDeck(book.id)
                                 showContextMenu = false
                             },
                             leadingIcon = {
@@ -360,7 +492,7 @@ fun BookCard(
                         DropdownMenuItem(
                             text = { 
                                 Text(
-                                    "Mark as Reading",
+                                    if (book.isAudiobook()) "Mark as Listening" else "Mark as Reading",
                                     color = theme.primaryTextColor
                                 )
                             },
@@ -420,6 +552,27 @@ fun BookCard(
                         )
                     }
                 )
+                
+                // Add "Move to Browse" or "Remove from App" option based on context
+                DropdownMenuItem(
+                    text = { 
+                        Text(
+                            if (isBrowseMode) "Remove from App" else "Move to Browse",
+                            color = theme.primaryTextColor
+                        )
+                    },
+                    onClick = {
+                        onRemoveFromLibrary(book.id)
+                        showContextMenu = false
+                    },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Filled.RemoveCircle,
+                            contentDescription = null,
+                            tint = Color(0xFFFF5722) // Orange-red color for remove action
+                        )
+                    }
+                )
             }
         }
     }
@@ -443,7 +596,17 @@ fun BookCard(
             theme = theme,
             onDismiss = { showBookSettings = false },
             onSaveSettings = { metadataUpdate ->
-                val colorValue = metadataUpdate.userSelectedColor?.value?.toLong()
+                Log.d("BookCard", "onSaveSettings: userSelectedColor = ${metadataUpdate.userSelectedColor}")
+                Log.d("BookCard", "onSaveSettings: coverDisplayMode = ${metadataUpdate.coverDisplayMode}")
+                
+                // Convert color properly - the issue might be here
+                val colorValue = metadataUpdate.userSelectedColor?.let { color ->
+                    // Convert ULong color value to Long safely
+                    val colorULong = color.value
+                    // Always use the full color value as signed Long
+                    colorULong.toLong()
+                }
+                Log.d("BookCard", "onSaveSettings: converted colorValue = $colorValue")
                 println("BookCard.onSaveSettings: Before copy - book progress: ${book.progress}, explicitStatus: ${book.explicitReadingStatus}")
                 val updatedBook = book.copy(
                     // Update only the metadata fields from the dialog

@@ -9,14 +9,19 @@
     
     <!-- Reading Status -->
     <string name="reading">Reading</string>
-    <string name="plan_to_read">Plan to Read</string>
+    <string name="plan_to_read">On Deck</string>
     <string name="completed">Completed</string>
     
     <!-- Actions -->
     <string name="start_reading">Start Reading</string>
+    <string name="start_listening">Start Listening</string>
     <string name="mark_completed">Mark Completed</string>
-    <string name="move_to_plan">Move to Plan to Read</string>
+    <string name="mark_finished">Mark as Finished</string>
+    <string name="move_to_plan">Move to On Deck</string>
     <string name="remove_book">Remove Book</string>
+    <string name="move_to_browse">Move to Browse</string>
+    <string name="remove_from_library">Remove from Library</string>
+    <string name="remove_from_app">Remove from App</string>
     <string name="edit_tags">Edit Tags</string>
     <string name="see_all">See All</string>
     <string name="cancel">Cancel</string>

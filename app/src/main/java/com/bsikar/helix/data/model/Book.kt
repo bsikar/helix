@@ -7,10 +7,12 @@ import java.io.File
 
 @Serializable
 enum class ReadingStatus {
-    UNREAD,        // Book is imported but not organized yet
-    PLAN_TO_READ,  // User explicitly added to reading plan  
-    READING,       // Currently reading
-    COMPLETED      // Finished reading
+    UNREAD,         // Book is imported but not organized yet
+    PLAN_TO_READ,   // User explicitly added to reading plan (for text books)
+    READING,        // Currently reading (for text books)
+    PLAN_TO_LISTEN, // User explicitly added to listening plan (for audiobooks)
+    LISTENING,      // Currently listening (for audiobooks)
+    COMPLETED       // Finished reading/listening
 }
 
 @Serializable
@@ -74,7 +76,7 @@ data class Book(
     // Convenience property for UI
     val coverColorComposeColor: Color
         get() = try {
-            Color(coverColor and 0xFFFFFFFFL)
+            Color(coverColor.toULong())
         } catch (e: Exception) {
             Color(0xFF6B73FF) // Default blue color as fallback
         }
@@ -88,7 +90,7 @@ data class Book(
                 // Always use color (user selected or default)
                 val colorValue = userSelectedColor ?: coverColor
                 try {
-                    Color(colorValue and 0xFFFFFFFFL)
+                    Color(colorValue.toULong())
                 } catch (e: Exception) {
                     Color(0xFF6B73FF) // Default blue color as fallback
                 }
@@ -102,7 +104,7 @@ data class Book(
                 } else {
                     val colorValue = userSelectedColor ?: coverColor
                     try {
-                        Color(colorValue and 0xFFFFFFFFL)
+                        Color(colorValue.toULong())
                     } catch (e: Exception) {
                         Color(0xFF6B73FF) // Default blue color as fallback
                     }

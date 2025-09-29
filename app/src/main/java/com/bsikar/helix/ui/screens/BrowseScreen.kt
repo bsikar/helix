@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import android.util.Log
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.*
@@ -51,10 +52,11 @@ fun BrowseScreen(
     allBooks: List<com.bsikar.helix.data.model.Book> = emptyList(),
     onStartReading: (String) -> Unit = {},
     onMarkCompleted: (String) -> Unit = {},
-    onMoveToPlanToRead: (String) -> Unit = {},
+    onMoveToOnDeck: (String) -> Unit = {},
     onSetProgress: (String, Float) -> Unit = { _, _ -> },
     onEditTags: (String, List<String>) -> Unit = { _, _ -> },
     onUpdateBookSettings: (com.bsikar.helix.data.model.Book) -> Unit = { _ -> },
+    onRemoveFromLibrary: (String) -> Unit = { _ -> },
     onRefresh: () -> Unit = {}
 ) {
     var searchQuery by remember { mutableStateOf("") }
@@ -72,6 +74,9 @@ fun BrowseScreen(
     LaunchedEffect(allBooks) {
         // Only update books that aren't being locally modified
         internalAllBooks = allBooks
+        Log.d("BrowseScreen", "Updated book list: ${allBooks.size} total books")
+        Log.d("BrowseScreen", "Audiobooks: ${allBooks.count { it.isAudiobook() }}")
+        Log.d("BrowseScreen", "Regular books: ${allBooks.count { !it.isAudiobook() }}")
     }
     
     // Function to update a book in the internal list
@@ -96,17 +101,20 @@ fun BrowseScreen(
         when (windowSizeClass) {
             WindowSizeClass.COMPACT -> {
                 // Use horizontal scroll for phones
-                InfiniteHorizontalScroll(
+                InfiniteHorizontalBookScroll(
                     books = books,
+                    showProgress = false,
                     theme = theme,
                     searchQuery = searchQuery,
+                    isBrowseMode = true,
                     onBookClick = onBookClick,
                     onStartReading = onStartReading,
                     onMarkCompleted = onMarkCompleted,
-                    onMoveToPlanToRead = onMoveToPlanToRead,
+                    onMoveToOnDeck = onMoveToOnDeck,
                     onSetProgress = onSetProgress,
                     onEditTags = onEditTags,
-                    onUpdateBookSettings = updateBookInList
+                    onUpdateBookSettings = updateBookInList,
+                    onRemoveFromLibrary = onRemoveFromLibrary
                 )
             }
             WindowSizeClass.MEDIUM, WindowSizeClass.EXPANDED -> {
@@ -123,13 +131,15 @@ fun BrowseScreen(
                             theme = theme,
                             searchQuery = searchQuery,
                             config = responsiveConfig,
+                            isBrowseMode = true,
                             onBookClick = onBookClick,
                             onStartReading = onStartReading,
                             onMarkCompleted = onMarkCompleted,
-                            onMoveToPlanToRead = onMoveToPlanToRead,
+                            onMoveToOnDeck = onMoveToOnDeck,
                             onSetProgress = onSetProgress,
                             onEditTags = onEditTags,
-                            onUpdateBookSettings = updateBookInList
+                            onUpdateBookSettings = updateBookInList,
+                            onRemoveFromLibrary = onRemoveFromLibrary
                         )
                     }
                 }
@@ -139,24 +149,39 @@ fun BrowseScreen(
     
     // Organize books by meaningful categories for personal library
     val recentlyAdded = remember(internalAllBooks) {
-        // Recently imported books (within last 30 days)
+        // Recently imported books (all types including audiobooks)
         internalAllBooks.filter { it.isImported }
             .sortedByDescending { it.dateAdded }
             .take(8)
     }
     
     val currentlyReading = remember(internalAllBooks) {
-        // Books currently being read (progress between 0 and 1, excluding completed)
-        internalAllBooks.filter { it.progress > 0f && it.progress < 1f }
+        // Books currently being read (progress between 0 and 1, excluding completed and audiobooks)
+        internalAllBooks.filter { !it.isAudiobook() && it.progress > 0f && it.progress < 1f }
             .sortedByDescending { it.lastReadTimestamp }
             .take(6)
     }
     
     val unreadBooks = remember(internalAllBooks) {
-        // Books that haven't been started yet
-        internalAllBooks.filter { it.progress == 0f }
+        // Books that haven't been started yet (exclude audiobooks)
+        internalAllBooks.filter { !it.isAudiobook() && it.progress == 0f }
             .sortedBy { it.title }
             .take(10)
+    }
+    
+    // Separate section for audiobooks
+    val currentlyListening = remember(internalAllBooks) {
+        // Audiobooks currently being listened to
+        internalAllBooks.filter { it.isAudiobook() && it.progress > 0f && it.progress < 1f }
+            .sortedByDescending { it.lastReadTimestamp }
+            .take(8)
+    }
+    
+    val audiobooksToListen = remember(internalAllBooks) {
+        // Unplayed audiobooks
+        internalAllBooks.filter { it.isAudiobook() && it.progress == 0f }
+            .sortedByDescending { it.dateAdded }
+            .take(8)
     }
     
     val byAuthor = remember(internalAllBooks) {
@@ -209,6 +234,14 @@ fun BrowseScreen(
     
     val filteredUnreadBooks = remember(searchQuery, selectedTags, unreadBooks) {
         filterBooksByTags(unreadBooks, searchQuery, selectedTags)
+    }
+    
+    val filteredCurrentlyListening = remember(searchQuery, selectedTags, currentlyListening) {
+        filterBooksByTags(currentlyListening, searchQuery, selectedTags)
+    }
+    
+    val filteredAudiobooksToListen = remember(searchQuery, selectedTags, audiobooksToListen) {
+        filterBooksByTags(audiobooksToListen, searchQuery, selectedTags)
     }
     
     // Filter authors who have books matching the current filters
@@ -369,7 +402,24 @@ fun BrowseScreen(
                 }
             }
 
-            // Currently Reading Section
+            // Currently Listening Section (Audiobooks)
+            if (filteredCurrentlyListening.isNotEmpty()) {
+                item {
+                    BrowseSectionHeader(
+                        title = "Currently Listening", 
+                        theme = theme,
+                        icon = Icons.Filled.Headphones,
+                        onSeeAllClick = { onSeeAllClick("Currently Listening", filteredCurrentlyListening) }
+                    )
+                }
+                item {
+                    ResponsiveBrowseSection(
+                        books = filteredCurrentlyListening
+                    )
+                }
+            }
+            
+            // Currently Reading Section (Regular books)
             if (filteredCurrentlyReading.isNotEmpty()) {
                 item {
                     BrowseSectionHeader(
@@ -401,6 +451,22 @@ fun BrowseScreen(
                 }
             }
 
+            // Audiobooks to Listen Section
+            if (filteredAudiobooksToListen.isNotEmpty()) {
+                item {
+                    BrowseSectionHeader(
+                        title = "Audiobooks", 
+                        theme = theme,
+                        onSeeAllClick = { onSeeAllClick("Audiobooks", filteredAudiobooksToListen) }
+                    )
+                }
+                item {
+                    ResponsiveBrowseSection(
+                        books = filteredAudiobooksToListen
+                    )
+                }
+            }
+            
             // Unread Books Section
             if (filteredUnreadBooks.isNotEmpty()) {
                 item {
@@ -514,6 +580,7 @@ fun BrowseScreen(
 fun BrowseSectionHeader(
     title: String, 
     theme: AppTheme,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
     onSeeAllClick: () -> Unit = {}
 ) {
     Row(
@@ -523,12 +590,25 @@ fun BrowseSectionHeader(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = title,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = theme.primaryTextColor
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            icon?.let {
+                Icon(
+                    imageVector = it,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = theme.accentColor
+                )
+            }
+            Text(
+                text = title,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = theme.primaryTextColor
+            )
+        }
         TextButton(
             onClick = onSeeAllClick
         ) {
@@ -549,10 +629,11 @@ fun InfiniteHorizontalScroll(
     onBookClick: (Book) -> Unit,
     onStartReading: (String) -> Unit = {},
     onMarkCompleted: (String) -> Unit = {},
-    onMoveToPlanToRead: (String) -> Unit = {},
+    onMoveToOnDeck: (String) -> Unit = {},
     onSetProgress: (String, Float) -> Unit = { _, _ -> },
     onEditTags: (String, List<String>) -> Unit = { _, _ -> },
-    onUpdateBookSettings: (com.bsikar.helix.data.model.Book) -> Unit = { _ -> }
+    onUpdateBookSettings: (com.bsikar.helix.data.model.Book) -> Unit = { _ -> },
+    onRemoveFromLibrary: (String) -> Unit = { _ -> }
 ) {
     // Use the new circular implementation from BookSection
     InfiniteHorizontalBookScroll(
@@ -561,13 +642,15 @@ fun InfiniteHorizontalScroll(
         theme = theme,
         searchQuery = searchQuery,
         contentPadding = PaddingValues(horizontal = 16.dp),
+        isBrowseMode = true,
         onBookClick = onBookClick,
         onStartReading = onStartReading,
         onMarkCompleted = onMarkCompleted,
-        onMoveToPlanToRead = onMoveToPlanToRead,
+        onMoveToOnDeck = onMoveToOnDeck,
         onSetProgress = onSetProgress,
         onEditTags = onEditTags,
-        onUpdateBookSettings = onUpdateBookSettings
+        onUpdateBookSettings = onUpdateBookSettings,
+        onRemoveFromLibrary = onRemoveFromLibrary
     )
 }
 

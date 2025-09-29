@@ -5,12 +5,10 @@ import android.util.Log
 import com.bsikar.helix.data.model.AudioChapter
 import com.bsikar.helix.data.model.Book
 import com.bsikar.helix.data.model.BookType
+import com.bsikar.helix.data.model.ReadingStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-// Simplified M4B parser without mp4parser dependency for now
-// This will be a basic implementation that extracts basic metadata
 import java.io.File
-import java.io.FileInputStream
 import java.util.*
 import kotlin.random.Random
 
@@ -29,7 +27,8 @@ data class ParsedM4b(
     val chapters: List<AudioChapter>,
     val filePath: String,
     val fileSize: Long,
-    val durationMs: Long
+    val durationMs: Long,
+    val coverImagePath: String? = null
 )
 
 /**
@@ -78,12 +77,16 @@ data class M4bMetadata(
 
 /**
  * M4B parser for extracting metadata and chapter information from audiobook files
+ * Uses advanced metadata extraction with mp4parser and MediaMetadataRetriever
  */
 class M4bParser(private val context: Context) {
     
+    private val metadataExtractor = M4bMetadataExtractor(context)
+    private val chapterExtractor = ChapterExtractor(context)
+    
     /**
      * Parse M4B file and extract metadata and chapters
-     * Simplified implementation for basic metadata extraction
+     * Uses advanced metadata extraction with mp4parser and MediaMetadataRetriever
      */
     suspend fun parseM4b(
         file: File,
@@ -99,18 +102,23 @@ class M4bParser(private val context: Context) {
             
             progressCallback?.onProgress(0.3f, "Extracting metadata")
             
-            // Extract basic metadata from filename and file properties
-            val metadata = extractBasicMetadata(file)
+            // Extract comprehensive metadata using the new extractor
+            val metadata = metadataExtractor.extractMetadata(file)
             
-            progressCallback?.onProgress(0.6f, "Creating default chapters")
+            progressCallback?.onProgress(0.5f, "Extracting chapters")
             
-            // Create a single chapter for the entire audiobook (simplified approach)
-            val chapters = createDefaultChapters(file.name)
+            // Extract chapter information with enhanced extractor (chapters will get proper book ID later)
+            val chapters = chapterExtractor.extractChapters(file, "")
             
-            progressCallback?.onProgress(0.8f, "Calculating duration")
+            progressCallback?.onProgress(0.7f, "Calculating duration")
             
-            // Estimate duration (we'll update this when proper metadata extraction is implemented)
-            val durationMs = estimateDuration(file)
+            // Get accurate duration
+            val durationMs = metadataExtractor.extractDuration(file)
+            
+            progressCallback?.onProgress(0.9f, "Processing cover art")
+            
+            // Don't save cover art here - we'll do it in createBookFromParsedM4b with the actual book ID
+            var coverImagePath: String? = null
             
             progressCallback?.onProgress(1.0f, "Parsing complete")
             
@@ -119,7 +127,8 @@ class M4bParser(private val context: Context) {
                 chapters = chapters,
                 filePath = file.absolutePath,
                 fileSize = file.length(),
-                durationMs = durationMs
+                durationMs = durationMs,
+                coverImagePath = coverImagePath
             )
             
             Log.d("M4bParser", "Successfully parsed M4B: ${metadata.title} with ${chapters.size} chapters")
@@ -127,7 +136,26 @@ class M4bParser(private val context: Context) {
             
         } catch (e: Exception) {
             Log.e("M4bParser", "Failed to parse M4B file: ${e.message}", e)
-            Result.failure(e)
+            // Fallback to basic metadata extraction
+            try {
+                val fallbackMetadata = extractBasicMetadata(file)
+                val fallbackChapters = createDefaultChapters(file.name)
+                val fallbackDuration = estimateDuration(file)
+                
+                val parsedM4b = ParsedM4b(
+                    metadata = fallbackMetadata,
+                    chapters = fallbackChapters,
+                    filePath = file.absolutePath,
+                    fileSize = file.length(),
+                    durationMs = fallbackDuration,
+                    coverImagePath = null
+                )
+                
+                Log.d("M4bParser", "Used fallback parsing for M4B: ${fallbackMetadata.title}")
+                Result.success(parsedM4b)
+            } catch (fallbackError: Exception) {
+                Result.failure(e)
+            }
         }
     }
     
@@ -224,14 +252,40 @@ class M4bParser(private val context: Context) {
      * Convert ParsedM4b to Book model
      */
     fun createBookFromParsedM4b(parsedM4b: ParsedM4b, bookId: String = UUID.randomUUID().toString()): Book {
-        // Generate a random cover color
+        // Generate a random cover color - ALWAYS set this for audiobooks
         val coverColors = listOf(
             0xFF2196F3L, 0xFF4CAF50L, 0xFFFF9800L, 0xFF9C27B0L,
-            0xFFE91E63L, 0xFF00BCD4L, 0xFFFF5722L, 0xFF795548L
+            0xFFE91E63L, 0xFF00BCD4L, 0xFFFF5722L, 0xFF795548L,
+            0xFF3F51B5L, 0xFF009688L, 0xFFFFC107L, 0xFF607D8B
         )
         val coverColor = coverColors[Random.nextInt(coverColors.size)]
+        Log.d("M4bParser", "Assigned cover color: $coverColor (0x${coverColor.toString(16)})")
         
-        return Book(
+        // Always try to save cover art with the correct book ID
+        var coverPath: String? = null
+        if (parsedM4b.metadata.coverArt != null) {
+            Log.d("M4bParser", "Found cover art data (${parsedM4b.metadata.coverArt.size} bytes), attempting to save with book ID: $bookId")
+            try {
+                kotlinx.coroutines.runBlocking {
+                    coverPath = metadataExtractor.saveCoverArt(parsedM4b.metadata.coverArt, bookId)
+                    Log.d("M4bParser", "Cover art save result: $coverPath")
+                }
+            } catch (e: Exception) {
+                Log.e("M4bParser", "Failed to save cover art: ${e.message}", e)
+            }
+        } else {
+            Log.d("M4bParser", "No cover art found in metadata")
+        }
+        
+        // Update chapters with the correct book ID
+        val updatedChapters = parsedM4b.chapters.map { chapter ->
+            chapter.copy(bookId = bookId)
+        }
+        
+        // Create updated ParsedM4b with corrected chapters
+        val updatedParsedM4b = parsedM4b.copy(chapters = updatedChapters)
+        
+        val book = Book(
             id = bookId,
             title = parsedM4b.metadata.title,
             author = parsedM4b.metadata.author ?: "Unknown Author",
@@ -251,19 +305,28 @@ class M4bParser(private val context: Context) {
             fileSize = parsedM4b.fileSize,
             totalChapters = parsedM4b.chapters.size,
             description = parsedM4b.metadata.description,
-            publisher = null,
+            publisher = parsedM4b.metadata.album, // Use album as publisher for audiobooks
             language = "en", // Default language
             isbn = null,
             publishedDate = parsedM4b.metadata.year,
-            coverImagePath = null, // TODO: Extract and save cover art
+            coverImagePath = coverPath,
             isImported = true,
-            fileChecksum = null, // TODO: Calculate checksum if needed
+            fileChecksum = null,
             userEditedMetadata = false,
-            explicitReadingStatus = null,
+            explicitReadingStatus = ReadingStatus.PLAN_TO_LISTEN,
             bookType = BookType.AUDIOBOOK,
             durationMs = parsedM4b.durationMs,
             currentPositionMs = 0L,
             playbackSpeed = 1.0f
         )
+        
+        Log.d("M4bParser", "Created book: ${book.title} by ${book.author}")
+        Log.d("M4bParser", "Book ID: ${book.id}")
+        Log.d("M4bParser", "Cover color: ${book.coverColor} (0x${book.coverColor.toString(16)})")
+        Log.d("M4bParser", "Cover image path: ${book.coverImagePath}")
+        Log.d("M4bParser", "Book type: ${book.bookType}")
+        Log.d("M4bParser", "Is audiobook: ${book.isAudiobook()}")
+        
+        return book
     }
 }

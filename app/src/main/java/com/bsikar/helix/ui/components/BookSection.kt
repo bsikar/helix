@@ -36,7 +36,7 @@ fun BookSection(
     onBookClick: (Book) -> Unit = {},
     onStartReading: (String) -> Unit = {},
     onMarkCompleted: (String) -> Unit = {},
-    onMoveToPlanToRead: (String) -> Unit = {},
+    onMoveToOnDeck: (String) -> Unit = {},
     onSetProgress: (String, Float) -> Unit = { _, _ -> },
     onEditTags: (String, List<String>) -> Unit = { _, _ -> },
     onUpdateBookSettings: (Book) -> Unit = { _ -> }
@@ -91,7 +91,7 @@ fun BookSection(
                 onBookClick = onBookClick,
                 onStartReading = onStartReading,
                 onMarkCompleted = onMarkCompleted,
-                onMoveToPlanToRead = onMoveToPlanToRead,
+                onMoveToOnDeck = onMoveToOnDeck,
                 onSetProgress = onSetProgress,
                 onEditTags = onEditTags,
                 onUpdateBookSettings = onUpdateBookSettings
@@ -112,7 +112,7 @@ fun BookSection(
                         onBookClick = onBookClick,
                         onStartReading = onStartReading,
                         onMarkCompleted = onMarkCompleted,
-                        onMoveToPlanToRead = onMoveToPlanToRead,
+                        onMoveToOnDeck = onMoveToOnDeck,
                         onSetProgress = onSetProgress,
                         onEditTags = onEditTags,
                         onUpdateBookSettings = onUpdateBookSettings
@@ -133,13 +133,15 @@ fun InfiniteHorizontalBookScroll(
     searchQuery: String = "",
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp),
+    isBrowseMode: Boolean = false,
     onBookClick: (Book) -> Unit = {},
     onStartReading: (String) -> Unit = {},
     onMarkCompleted: (String) -> Unit = {},
-    onMoveToPlanToRead: (String) -> Unit = {},
+    onMoveToOnDeck: (String) -> Unit = {},
     onSetProgress: (String, Float) -> Unit = { _, _ -> },
     onEditTags: (String, List<String>) -> Unit = { _, _ -> },
-    onUpdateBookSettings: (Book) -> Unit = { _ -> }
+    onUpdateBookSettings: (Book) -> Unit = { _ -> },
+    onRemoveFromLibrary: (String) -> Unit = { _ -> }
 ) {
     if (books.isEmpty()) return
     
@@ -176,13 +178,15 @@ fun InfiniteHorizontalBookScroll(
                     showProgress = showProgress,
                     theme = theme,
                     searchQuery = searchQuery,
+                    isBrowseMode = isBrowseMode,
                     onBookClick = onBookClick,
                     onStartReading = onStartReading,
                     onMarkCompleted = onMarkCompleted,
-                    onMoveToPlanToRead = onMoveToPlanToRead,
+                    onMoveToOnDeck = onMoveToOnDeck,
                     onSetProgress = onSetProgress,
                     onEditTags = onEditTags,
-                    onUpdateBookSettings = onUpdateBookSettings
+                    onUpdateBookSettings = onUpdateBookSettings,
+                    onRemoveFromLibrary = onRemoveFromLibrary
                 )
             }
         }
@@ -218,13 +222,15 @@ fun InfiniteHorizontalBookScroll(
                     showProgress = showProgress,
                     theme = theme,
                     searchQuery = searchQuery,
+                    isBrowseMode = isBrowseMode,
                     onBookClick = onBookClick,
                     onStartReading = onStartReading,
                     onMarkCompleted = onMarkCompleted,
-                    onMoveToPlanToRead = onMoveToPlanToRead,
+                    onMoveToOnDeck = onMoveToOnDeck,
                     onSetProgress = onSetProgress,
                     onEditTags = onEditTags,
-                    onUpdateBookSettings = onUpdateBookSettings
+                    onUpdateBookSettings = onUpdateBookSettings,
+                    onRemoveFromLibrary = onRemoveFromLibrary
                 )
             }
         }
