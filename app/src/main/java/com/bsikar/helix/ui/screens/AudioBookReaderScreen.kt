@@ -365,11 +365,7 @@ fun AudioBookReaderScreen(
                         ambientColor = theme.accentColor.copy(alpha = 0.3f),
                         spotColor = theme.accentColor.copy(alpha = 0.3f)
                     ),
-                containerColor = animateColorAsState(
-                    targetValue = if (playbackState.isPlaying) theme.accentColor else theme.accentColor.copy(alpha = 0.9f),
-                    animationSpec = tween(300),
-                    label = "play_button_color"
-                ).value,
+                containerColor = theme.accentColor,
                 contentColor = Color.White
             ) {
                 Icon(
