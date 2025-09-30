@@ -1,40 +1,28 @@
 package com.bsikar.helix.viewmodels
 
 import androidx.lifecycle.ViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
+import com.bsikar.helix.player.AudioBookPlayer
+import com.bsikar.helix.player.PlaybackState
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 
-class PlayerViewModel : ViewModel() {
+@HiltViewModel
+class PlayerViewModel @Inject constructor(
+    private val audioBookPlayer: AudioBookPlayer
+) : ViewModel() {
 
-    private val _playbackState = MutableStateFlow<PlaybackState>(PlaybackState.Stopped)
-    val playbackState: StateFlow<PlaybackState> = _playbackState.asStateFlow()
+    val playbackState: StateFlow<PlaybackState> = audioBookPlayer.playbackState
 
-    fun play(trackDetails: String) {
-        _playbackState.value = PlaybackState.Playing(trackDetails)
+    fun play() {
+        audioBookPlayer.play()
     }
 
     fun pause() {
-        val currentState = _playbackState.value
-        if (currentState is PlaybackState.Playing) {
-            _playbackState.value = PlaybackState.Paused(currentState.trackDetails)
-        }
+        audioBookPlayer.pause()
     }
 
-    fun resume() {
-        val currentState = _playbackState.value
-        if (currentState is PlaybackState.Paused) {
-            _playbackState.value = PlaybackState.Playing(currentState.trackDetails)
-        }
-    }
-
-    fun stop() {
-        _playbackState.value = PlaybackState.Stopped
-    }
-
-    sealed class PlaybackState {
-        object Stopped : PlaybackState()
-        data class Playing(val trackDetails: String) : PlaybackState()
-        data class Paused(val trackDetails: String) : PlaybackState()
+    fun togglePlayPause() {
+        audioBookPlayer.togglePlayPause()
     }
 }

@@ -32,24 +32,25 @@ import com.bsikar.helix.data.ImportProgress
 import com.bsikar.helix.data.LibraryManager
 import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.theme.ThemeMode
-import com.bsikar.helix.ui.components.InfiniteHorizontalBookScroll
-import com.bsikar.helix.ui.components.SearchBar
-import com.bsikar.helix.ui.components.ResponsiveConfig
-import com.bsikar.helix.ui.components.ResponsiveBookGrid
-import com.bsikar.helix.ui.components.ResponsiveBookCard
-import com.bsikar.helix.ui.components.getWindowSizeClass
-import com.bsikar.helix.ui.components.WindowSizeClass
-import com.bsikar.helix.ui.components.ImportProgressIndicator
 import com.bsikar.helix.ui.components.CompactImportProgress
+import com.bsikar.helix.ui.components.HelixBottomNavigation
+import com.bsikar.helix.ui.components.ImportProgressIndicator
+import com.bsikar.helix.ui.components.InfiniteHorizontalBookScroll
+import com.bsikar.helix.ui.components.ResponsiveBookCard
+import com.bsikar.helix.ui.components.ResponsiveBookGrid
+import com.bsikar.helix.ui.components.ResponsiveConfig
 import com.bsikar.helix.ui.components.ResponsiveSpacing
+import com.bsikar.helix.ui.components.SearchBar
+import com.bsikar.helix.ui.components.WindowSizeClass
+import com.bsikar.helix.ui.components.getWindowSizeClass
 import com.bsikar.helix.managers.ImportManager
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
-    selectedTab: Int,
-    onTabSelected: (Int) -> Unit,
+    selectedTab: MainTab,
+    onTabSelected: (MainTab) -> Unit,
     currentTheme: ThemeMode,
     onThemeChange: (ThemeMode) -> Unit,
     theme: AppTheme,
@@ -58,6 +59,10 @@ fun LibraryScreen(
     completedBooks: List<com.bsikar.helix.data.model.Book>,
     allBooks: List<com.bsikar.helix.data.model.Book>,
     currentlyPlayingAudiobook: Book? = null,
+    isPlayingVisible: Boolean = false,
+    isPlayingActive: Boolean = false,
+    onPlayingClick: () -> Unit = {},
+    playingLabel: String? = null,
     onNavigateToSettings: () -> Unit = {},
     onNavigateToProgressSettings: () -> Unit = {},
     onBookClick: (Book) -> Unit = {},
@@ -245,71 +250,15 @@ fun LibraryScreen(
             )
         },
         bottomBar = {
-            NavigationBar(
-                containerColor = theme.surfaceColor,
-                tonalElevation = 8.dp
-            ) {
-                NavigationBarItem(
-                    selected = selectedTab == 0,
-                    onClick = { onTabSelected(0) },
-                    icon = {
-                        Icon(
-                            Icons.AutoMirrored.Filled.LibraryBooks,
-                            contentDescription = stringResource(R.string.cd_library),
-                            tint = if (selectedTab == 0) theme.accentColor else theme.secondaryTextColor
-                        )
-                    },
-                    label = {
-                        Text(
-                            stringResource(R.string.library),
-                            color = if (selectedTab == 0) theme.accentColor else theme.secondaryTextColor
-                        )
-                    },
-                    colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = Color.Transparent
-                    )
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 1,
-                    onClick = { onTabSelected(1) },
-                    icon = {
-                        Icon(
-                            Icons.Filled.Schedule,
-                            contentDescription = stringResource(R.string.cd_recents),
-                            tint = if (selectedTab == 1) theme.accentColor else theme.secondaryTextColor
-                        )
-                    },
-                    label = {
-                        Text(
-                            stringResource(R.string.recents),
-                            color = if (selectedTab == 1) theme.accentColor else theme.secondaryTextColor
-                        )
-                    },
-                    colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = Color.Transparent
-                    )
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 2,
-                    onClick = { onTabSelected(2) },
-                    icon = {
-                        Icon(
-                            Icons.Filled.Search,
-                            contentDescription = stringResource(R.string.cd_browse),
-                            tint = if (selectedTab == 2) theme.accentColor else theme.secondaryTextColor
-                        )
-                    },
-                    label = {
-                        Text(
-                            stringResource(R.string.browse),
-                            color = if (selectedTab == 2) theme.accentColor else theme.secondaryTextColor
-                        )
-                    },
-                    colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = Color.Transparent
-                    )
-                )
-            }
+            HelixBottomNavigation(
+                selectedTab = selectedTab,
+                onTabSelected = onTabSelected,
+                isPlayingVisible = isPlayingVisible,
+                isPlayingActive = isPlayingActive,
+                onPlayingClick = onPlayingClick,
+                playingTitle = playingLabel,
+                theme = theme
+            )
         }
     ) { innerPadding ->
         // Handle UiState for library operations

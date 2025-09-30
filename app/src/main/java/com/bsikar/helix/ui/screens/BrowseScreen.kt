@@ -18,11 +18,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bsikar.helix.R
 import com.bsikar.helix.data.model.Book
 import com.bsikar.helix.data.model.Tag
 import com.bsikar.helix.data.model.TagCategory
@@ -31,21 +33,26 @@ import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.theme.ThemeManager
 import com.bsikar.helix.theme.ThemeMode
 import com.bsikar.helix.ui.components.BookCard
+import com.bsikar.helix.ui.components.HelixBottomNavigation
 import com.bsikar.helix.ui.components.InfiniteHorizontalBookScroll
+import com.bsikar.helix.ui.components.ResponsiveBookCard
+import com.bsikar.helix.ui.components.ResponsiveBookGrid
+import com.bsikar.helix.ui.components.ResponsiveConfig
+import com.bsikar.helix.ui.components.ResponsiveSpacing
 import com.bsikar.helix.ui.components.SearchBar
 import com.bsikar.helix.ui.components.SearchUtils
-import com.bsikar.helix.ui.components.ResponsiveConfig
-import com.bsikar.helix.ui.components.ResponsiveBookGrid
-import com.bsikar.helix.ui.components.ResponsiveBookCard
-import com.bsikar.helix.ui.components.getWindowSizeClass
 import com.bsikar.helix.ui.components.WindowSizeClass
-import com.bsikar.helix.ui.components.ResponsiveSpacing
+import com.bsikar.helix.ui.components.getWindowSizeClass
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BrowseScreen(
-    selectedTab: Int = 2,
-    onTabSelected: (Int) -> Unit = {},
+    selectedTab: MainTab = MainTab.Search,
+    onTabSelected: (MainTab) -> Unit = {},
+    isPlayingVisible: Boolean = false,
+    isPlayingActive: Boolean = false,
+    onPlayingClick: () -> Unit = {},
+    playingLabel: String? = null,
     theme: AppTheme,
     onNavigateToSettings: () -> Unit = {},
     onBookClick: (Book) -> Unit = {},
@@ -270,7 +277,7 @@ fun BrowseScreen(
                 ),
                 title = {
                     Text(
-                        "Browse",
+                        stringResource(R.string.search),
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Medium,
                         color = theme.primaryTextColor
@@ -280,7 +287,7 @@ fun BrowseScreen(
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(
                             Icons.Filled.Settings,
-                            contentDescription = "Settings",
+                            contentDescription = stringResource(R.string.cd_settings),
                             tint = theme.primaryTextColor
                         )
                     }
@@ -288,71 +295,15 @@ fun BrowseScreen(
             )
         },
         bottomBar = {
-            NavigationBar(
-                containerColor = theme.surfaceColor,
-                tonalElevation = 8.dp
-            ) {
-                NavigationBarItem(
-                    selected = selectedTab == 0,
-                    onClick = { onTabSelected(0) },
-                    icon = {
-                        Icon(
-                            Icons.AutoMirrored.Filled.LibraryBooks,
-                            contentDescription = "Library",
-                            tint = if (selectedTab == 0) theme.accentColor else theme.secondaryTextColor
-                        )
-                    },
-                    label = {
-                        Text(
-                            "Library",
-                            color = if (selectedTab == 0) theme.accentColor else theme.secondaryTextColor
-                        )
-                    },
-                    colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = Color.Transparent
-                    )
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 1,
-                    onClick = { onTabSelected(1) },
-                    icon = {
-                        Icon(
-                            Icons.Filled.Schedule,
-                            contentDescription = "Recents",
-                            tint = if (selectedTab == 1) theme.accentColor else theme.secondaryTextColor
-                        )
-                    },
-                    label = {
-                        Text(
-                            "Recents",
-                            color = if (selectedTab == 1) theme.accentColor else theme.secondaryTextColor
-                        )
-                    },
-                    colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = Color.Transparent
-                    )
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 2,
-                    onClick = { onTabSelected(2) },
-                    icon = {
-                        Icon(
-                            Icons.Filled.Search,
-                            contentDescription = "Browse",
-                            tint = if (selectedTab == 2) theme.accentColor else theme.secondaryTextColor
-                        )
-                    },
-                    label = {
-                        Text(
-                            "Browse",
-                            color = if (selectedTab == 2) theme.accentColor else theme.secondaryTextColor
-                        )
-                    },
-                    colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = Color.Transparent
-                    )
-                )
-            }
+            HelixBottomNavigation(
+                selectedTab = selectedTab,
+                onTabSelected = onTabSelected,
+                isPlayingVisible = isPlayingVisible,
+                isPlayingActive = isPlayingActive,
+                onPlayingClick = onPlayingClick,
+                playingTitle = playingLabel,
+                theme = theme
+            )
         }
     ) { innerPadding ->
         PullToRefreshBox(
