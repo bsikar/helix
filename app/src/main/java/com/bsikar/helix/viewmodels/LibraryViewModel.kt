@@ -40,8 +40,20 @@ class LibraryViewModel @Inject constructor(
     val allBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = _allBooks.asStateFlow()
     
     // Search and filtering state
+    enum class LibraryContentFilter {
+        ALL,
+        TEXT_ONLY,
+        AUDIO_ONLY
+    }
+
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _contentFilter = MutableStateFlow(LibraryContentFilter.ALL)
+    val contentFilter: StateFlow<LibraryContentFilter> = _contentFilter.asStateFlow()
+
+    private val _activeTagFilters = MutableStateFlow<Set<String>>(emptySet())
+    val activeTagFilters: StateFlow<Set<String>> = _activeTagFilters.asStateFlow()
     
     // Sorting state
     private val _readingSortAscending = MutableStateFlow(false)
@@ -136,6 +148,47 @@ class LibraryViewModel @Inject constructor(
     val recentBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = allBooks.map { books ->
         books.filter { it.lastReadTimestamp > 0 }
              .sortedByDescending { it.lastReadTimestamp }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    val filteredLibraryBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = combine(
+        allBooks,
+        debouncedSearchQuery,
+        contentFilter,
+        activeTagFilters
+    ) { books, query, filter, tagFilters ->
+        var filtered = when (filter) {
+            LibraryContentFilter.ALL -> books
+            LibraryContentFilter.TEXT_ONLY -> books.filter { !it.isAudiobook() }
+            LibraryContentFilter.AUDIO_ONLY -> books.filter { it.isAudiobook() }
+        }
+
+        val requiredTags = tagFilters
+            .mapNotNull { tagId -> tagId.takeIf { it.isNotBlank() } }
+            .toSet()
+
+        if (requiredTags.isNotEmpty()) {
+            filtered = filtered.filter { book ->
+                if (book.tags.isEmpty()) {
+                    false
+                } else {
+                    val bookTags = book.tags
+                        .asSequence()
+                        .filter { it.isNotBlank() }
+                        .toSet()
+                    requiredTags.all { it in bookTags }
+                }
+            }
+        }
+
+        if (query.isNotBlank()) {
+            filtered = searchBooks(filtered, query)
+        }
+
+        filtered.sortedBy { it.title.lowercase() }
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -438,7 +491,33 @@ class LibraryViewModel @Inject constructor(
 
     // Search and filtering methods
     fun updateSearchQuery(query: String) {
-        _searchQuery.value = query
+        val sanitizedQuery = sanitizeSearchQuery(query)
+        if (_searchQuery.value != sanitizedQuery) {
+            _searchQuery.value = sanitizedQuery
+        }
+    }
+
+    fun updateContentFilter(filter: LibraryContentFilter) {
+        if (_contentFilter.value == filter) return
+        _contentFilter.value = filter
+        // Clear tag filters when switching primary context to avoid stale selections
+        _activeTagFilters.value = emptySet()
+    }
+
+    fun toggleTagFilter(tagId: String) {
+        val sanitizedId = tagId.trim()
+        if (sanitizedId.isEmpty()) return
+        _activeTagFilters.update { current ->
+            if (current.contains(sanitizedId)) {
+                current - sanitizedId
+            } else {
+                current + sanitizedId
+            }
+        }
+    }
+
+    fun clearTagFilters() {
+        _activeTagFilters.value = emptySet()
     }
 
     fun toggleReadingSortOrder() {
@@ -456,7 +535,7 @@ class LibraryViewModel @Inject constructor(
     // Refresh functionality
     fun refreshLibrary() {
         if (_isRefreshing.value) return
-        
+
         _isRefreshing.value = true
         _scanMessage.value = "Scanning for new books..."
         
@@ -474,6 +553,17 @@ class LibraryViewModel @Inject constructor(
                 _scanMessage.value = ""
             }
         }
+    }
+
+    private fun sanitizeSearchQuery(rawQuery: String): String {
+        if (rawQuery.isBlank()) return ""
+
+        val collapsedWhitespace = rawQuery
+            .replace(WHITESPACE_REGEX, " ")
+            .filterNot { it.isISOControl() }
+            .trim()
+
+        return collapsedWhitespace.take(MAX_SEARCH_QUERY_LENGTH)
     }
 
     // Enhanced search logic with fuzzy matching
@@ -566,7 +656,7 @@ class LibraryViewModel @Inject constructor(
     fun importEpubsFromDirectorySafely(directoryPath: String) {
         viewModelScope.launch {
             _libraryState.value = UiState.Loading
-            
+
             val result = libraryManager.importEpubsFromDirectory(java.io.File(directoryPath)).toUiState()
             
             when (result) {
@@ -590,5 +680,10 @@ class LibraryViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    companion object {
+        private const val MAX_SEARCH_QUERY_LENGTH = 120
+        private val WHITESPACE_REGEX = Regex("\\s+")
     }
 }
