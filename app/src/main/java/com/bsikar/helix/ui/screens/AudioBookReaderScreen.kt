@@ -27,7 +27,7 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -109,7 +109,7 @@ fun AudioBookReaderScreen(
                 actions = {
                     IconButton(onClick = { showChapterList = true }) {
                         Icon(
-                            Icons.Filled.List,
+                            Icons.AutoMirrored.Filled.List,
                             contentDescription = "Chapters",
                             tint = theme.primaryTextColor
                         )
