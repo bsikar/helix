@@ -57,7 +57,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.bsikar.helix.data.ImportProgress
+import com.bsikar.helix.data.model.ImportProgress
 import com.bsikar.helix.data.model.Book
 import com.bsikar.helix.data.model.ReadingStatus
 import com.bsikar.helix.data.model.Tag
@@ -137,7 +137,7 @@ fun UnifiedLibraryScreen(
         usedTags
             .filter { it.category in allowedCategories }
             .groupBy { it.category }
-            .mapValues { (_, value) -> value.sortedBy { it.displayName.lowercase() } }
+            .mapValues { (_, value) -> value.sortedBy { it.name.lowercase() } }
     }
 
     val inProgressBooks = remember(books) {
@@ -472,7 +472,7 @@ private fun SecondaryFilterSection(
                         FilterChip(
                             selected = selected,
                             onClick = { onToggleTag(tag.id) },
-                            label = { Text(tag.displayName) },
+                            label = { Text(tag.name) },
                             colors = FilterChipDefaults.filterChipColors(
                                 containerColor = theme.surfaceColor,
                                 selectedContainerColor = theme.accentColor.copy(alpha = theme.alphaSubtle),

@@ -153,6 +153,9 @@ class LibraryViewModel @Inject constructor(
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = emptyList()
     )
+    
+    // Debounced search query for better performance
+    private val debouncedSearchQuery = searchQuery.debounce(300)
 
     val filteredLibraryBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = combine(
         allBooks,
@@ -182,9 +185,6 @@ class LibraryViewModel @Inject constructor(
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = emptyList()
     )
-
-    // Debounced search query for better performance
-    private val debouncedSearchQuery = searchQuery.debounce(300)
 
     // Filtered and sorted reading books
     val filteredReadingBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = combine(
