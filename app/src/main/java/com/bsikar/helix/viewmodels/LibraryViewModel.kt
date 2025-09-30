@@ -23,6 +23,7 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import com.bsikar.helix.data.model.UiState
+import com.bsikar.helix.data.model.toUiState
 import com.bsikar.helix.ui.components.SearchUtils
 
 enum class LibraryContentFilter {

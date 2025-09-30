@@ -39,3 +39,10 @@ inline fun <T> UiState<T>.onError(action: (Throwable) -> Unit): UiState<T> {
     if (this is UiState.Error) action(exception)
     return this
 }
+
+fun <T> Result<T>.toUiState(): UiState<T> {
+    return fold(
+        onSuccess = { UiState.Success(it) },
+        onFailure = { UiState.Error(it) }
+    )
+}

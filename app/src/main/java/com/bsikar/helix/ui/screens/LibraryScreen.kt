@@ -456,13 +456,14 @@ fun LibraryScreen(
             if (inProgressBooks.isNotEmpty()) {
                 val sectionKey = "in_progress_books_${inProgressBooks.size}"
                 item(key = "in_progress_header") {
+                    val inProgressTitleString = stringResource(id = inProgressTitleRes)
                     LibrarySectionHeader(
-                        title = stringResource(id = inProgressTitleRes),
+                        title = inProgressTitleString,
                         subtitle = stringResource(id = inProgressSubtitleRes),
                         theme = theme,
                         isAscending = readingSortAscending,
                         onSortClick = onToggleReadingSort,
-                        onSeeAllClick = { onSeeAllClick(stringResource(id = inProgressTitleRes), inProgressBooks) }
+                        onSeeAllClick = { onSeeAllClick(inProgressTitleString, inProgressBooks) }
                     )
                 }
                 item(key = sectionKey) {
@@ -479,13 +480,14 @@ fun LibraryScreen(
                     else -> R.string.section_on_deck_all
                 }
                 item(key = "plan_to_read_header") {
+                    val onDeckTitleString = stringResource(id = onDeckTitleRes)
                     LibrarySectionHeader(
-                        title = stringResource(id = onDeckTitleRes),
+                        title = onDeckTitleString,
                         subtitle = "Title",
                         theme = theme,
                         isAscending = onDeckSortAscending,
                         onSortClick = onToggleOnDeckSort,
-                        onSeeAllClick = { onSeeAllClick(stringResource(id = onDeckTitleRes), internalOnDeckBooks) }
+                        onSeeAllClick = { onSeeAllClick(onDeckTitleString, internalOnDeckBooks) }
                     )
                 }
                 item(key = "on_deck_books_${internalOnDeckBooks.size}") {
@@ -502,13 +504,14 @@ fun LibraryScreen(
                     else -> R.string.section_completed_all
                 }
                 item(key = "read_header") {
+                    val completedTitleString = stringResource(id = completedTitleRes)
                     LibrarySectionHeader(
-                        title = stringResource(id = completedTitleRes),
+                        title = completedTitleString,
                         subtitle = "Title",
                         theme = theme,
                         isAscending = completedSortAscending,
                         onSortClick = onToggleCompletedSort,
-                        onSeeAllClick = { onSeeAllClick(stringResource(id = completedTitleRes), internalCompletedBooks) }
+                        onSeeAllClick = { onSeeAllClick(completedTitleString, internalCompletedBooks) }
                     )
                 }
                 item(key = "read_books_${internalCompletedBooks.size}") {
