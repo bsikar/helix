@@ -122,11 +122,11 @@ fun BookCard(
             // Status indicator in top-right corner
             val statusColor = when (book.readingStatus) {
                 ReadingStatus.UNREAD -> Color.Transparent // No indicator for unread books
-                ReadingStatus.PLAN_TO_READ -> theme.secondaryTextColor.copy(alpha = 0.7f)
+                ReadingStatus.PLAN_TO_READ -> theme.secondaryTextColor.copy(alpha = theme.alphaHigh)
                 ReadingStatus.READING -> theme.accentColor
-                ReadingStatus.PLAN_TO_LISTEN -> theme.secondaryTextColor.copy(alpha = 0.7f)
+                ReadingStatus.PLAN_TO_LISTEN -> theme.secondaryTextColor.copy(alpha = theme.alphaHigh)
                 ReadingStatus.LISTENING -> theme.accentColor
-                ReadingStatus.COMPLETED -> Color(0xFF4CAF50)
+                ReadingStatus.COMPLETED -> theme.successColor
             }
             
             val statusIcon = when (book.readingStatus) {
@@ -220,7 +220,7 @@ fun BookCard(
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(4.dp))
-                    .background(theme.accentColor.copy(alpha = 0.1f))
+                    .background(theme.accentColor.copy(alpha = theme.alphaOverlay))
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             ) {
                 Row(
@@ -304,7 +304,7 @@ fun BookCard(
                                 Icon(
                                     Icons.Filled.CheckCircle,
                                     contentDescription = null,
-                                    tint = Color(0xFF4CAF50)
+                                    tint = theme.successColor
                                 )
                             }
                         )
@@ -344,7 +344,7 @@ fun BookCard(
                                 Icon(
                                     Icons.Filled.CheckCircle,
                                     contentDescription = null,
-                                    tint = Color(0xFF4CAF50)
+                                    tint = theme.successColor
                                 )
                             }
                         )
@@ -424,7 +424,7 @@ fun BookCard(
                                 Icon(
                                     Icons.Filled.CheckCircle,
                                     contentDescription = null,
-                                    tint = Color(0xFF4CAF50)
+                                    tint = theme.successColor
                                 )
                             }
                         )
@@ -569,7 +569,7 @@ fun BookCard(
                         Icon(
                             Icons.Filled.RemoveCircle,
                             contentDescription = null,
-                            tint = Color(0xFFFF5722) // Orange-red color for remove action
+                            tint = theme.errorColor
                         )
                     }
                 )

@@ -52,6 +52,7 @@ import com.bsikar.helix.data.model.AudioChapter
 import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.ui.components.AudioChapterNavigationSheet
 import com.bsikar.helix.ui.components.SmoothProgressBar
+import com.bsikar.helix.ui.components.ResponsiveSpacing
 import com.bsikar.helix.viewmodels.AudioBookReaderViewModel
 import kotlinx.coroutines.launch
 
@@ -157,7 +158,7 @@ fun AudioBookReaderScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(320.dp)
-                .padding(horizontal = 48.dp),
+                .padding(horizontal = ResponsiveSpacing.large() * 2),
             contentAlignment = Alignment.Center
         ) {
             Card(
@@ -221,7 +222,7 @@ fun AudioBookReaderScreen(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp),
+                .padding(horizontal = ResponsiveSpacing.large()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
@@ -307,7 +308,7 @@ fun AudioBookReaderScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp),
+                .padding(horizontal = ResponsiveSpacing.large()),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -400,7 +401,7 @@ fun AudioBookReaderScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp),
+                .padding(horizontal = ResponsiveSpacing.large()),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -442,7 +443,7 @@ fun AudioBookReaderScreen(
                         .clickable { showSleepTimer = true },
                     shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = theme.accentColor.copy(alpha = 0.2f)
+                        containerColor = theme.accentColor.copy(alpha = theme.alphaSubtle)
                     )
                 ) {
                     Row(
@@ -511,7 +512,7 @@ fun AudioBookReaderScreen(
                                 },
                             colors = CardDefaults.cardColors(
                                 containerColor = if (playbackState.playbackSpeed == speed) 
-                                    theme.accentColor.copy(alpha = 0.2f) 
+                                    theme.accentColor.copy(alpha = theme.alphaSubtle) 
                                 else 
                                     theme.backgroundColor
                             ),

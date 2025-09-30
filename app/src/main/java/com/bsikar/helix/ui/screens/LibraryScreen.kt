@@ -41,6 +41,7 @@ import com.bsikar.helix.ui.components.getWindowSizeClass
 import com.bsikar.helix.ui.components.WindowSizeClass
 import com.bsikar.helix.ui.components.ImportProgressIndicator
 import com.bsikar.helix.ui.components.CompactImportProgress
+import com.bsikar.helix.ui.components.ResponsiveSpacing
 import com.bsikar.helix.managers.ImportManager
 import kotlinx.coroutines.launch
 
@@ -164,7 +165,7 @@ fun LibraryScreen(
                     showProgress = showProgress,
                     theme = theme,
                     searchQuery = searchQuery,
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    contentPadding = ResponsiveSpacing.contentPadding(),
                     onBookClick = onBookClick,
                     onStartReading = onStartReading,
                     onMarkCompleted = onMarkCompleted,
@@ -409,7 +410,7 @@ fun LibraryScreen(
                         onDismiss = handleDismissImport,
                         onCancel = handleCancelImport,
                         onRetry = handleRetryImport,
-                        modifier = Modifier.padding(horizontal = 16.dp)
+                        modifier = Modifier.padding(horizontal = ResponsiveSpacing.medium())
                     )
                 }
             }
@@ -465,7 +466,7 @@ fun LibraryScreen(
                             book = book,
                             theme = theme,
                             onBookClick = onBookClick,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            modifier = Modifier.padding(horizontal = ResponsiveSpacing.medium(), vertical = ResponsiveSpacing.small())
                         )
                     }
                 }
@@ -582,7 +583,7 @@ fun LibrarySectionHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 4.dp),
+            .padding(start = ResponsiveSpacing.medium(), end = ResponsiveSpacing.small()),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {

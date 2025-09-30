@@ -38,6 +38,7 @@ import com.bsikar.helix.theme.ThemeMode
 import com.bsikar.helix.ui.components.SearchBar
 import com.bsikar.helix.ui.components.TagEditorDialog
 import com.bsikar.helix.ui.components.SearchUtils
+import com.bsikar.helix.ui.components.ResponsiveSpacing
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -254,7 +255,7 @@ fun SortOptionsRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = ResponsiveSpacing.medium()),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
@@ -315,7 +316,7 @@ fun RecentBookItem(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
+            .padding(horizontal = ResponsiveSpacing.medium())
             .combinedClickable(
                 onClick = { onBookClick() },
                 onLongClick = { showContextMenu = true }
@@ -415,7 +416,7 @@ fun RecentBookItem(
                             .fillMaxWidth()
                             .height(4.dp)
                             .background(
-                                color = theme.secondaryTextColor.copy(alpha = 0.2f),
+                                color = theme.secondaryTextColor.copy(alpha = theme.alphaSubtle),
                                 shape = RoundedCornerShape(2.dp)
                             )
                     ) {
@@ -503,7 +504,7 @@ fun RecentBookItem(
                             Icon(
                                 Icons.Filled.CheckCircle,
                                 contentDescription = null,
-                                tint = Color(0xFF4CAF50)
+                                tint = theme.successColor
                             )
                         }
                     )
@@ -543,7 +544,7 @@ fun RecentBookItem(
                             Icon(
                                 Icons.Filled.CheckCircle,
                                 contentDescription = null,
-                                tint = Color(0xFF4CAF50)
+                                tint = theme.successColor
                             )
                         }
                     )
@@ -583,7 +584,7 @@ fun RecentBookItem(
                             Icon(
                                 Icons.Filled.CheckCircle,
                                 contentDescription = null,
-                                tint = Color(0xFF4CAF50)
+                                tint = theme.successColor
                             )
                         }
                     )

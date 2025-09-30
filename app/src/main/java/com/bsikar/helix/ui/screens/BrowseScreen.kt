@@ -39,6 +39,7 @@ import com.bsikar.helix.ui.components.ResponsiveBookGrid
 import com.bsikar.helix.ui.components.ResponsiveBookCard
 import com.bsikar.helix.ui.components.getWindowSizeClass
 import com.bsikar.helix.ui.components.WindowSizeClass
+import com.bsikar.helix.ui.components.ResponsiveSpacing
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -367,7 +368,7 @@ fun BrowseScreen(
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = innerPadding,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(ResponsiveSpacing.small())
             ) {
             // Search Bar
             item {
@@ -586,7 +587,7 @@ fun BrowseSectionHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = ResponsiveSpacing.medium()),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -641,7 +642,7 @@ fun InfiniteHorizontalScroll(
         showProgress = false,
         theme = theme,
         searchQuery = searchQuery,
-        contentPadding = PaddingValues(horizontal = 16.dp),
+        contentPadding = ResponsiveSpacing.contentPadding(),
         isBrowseMode = true,
         onBookClick = onBookClick,
         onStartReading = onStartReading,
@@ -694,7 +695,7 @@ fun CollapsibleAllCategoriesFilter(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = ResponsiveSpacing.medium()),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         // Active Filters and Clear Filters Row
@@ -829,9 +830,9 @@ fun CollapsibleAllCategoriesFilter(
                     },
                     selected = expandedCategory == category,
                     colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = theme.accentColor.copy(alpha = 0.2f),
+                        selectedContainerColor = theme.accentColor.copy(alpha = theme.alphaSubtle),
                         containerColor = theme.surfaceColor,
-                        disabledContainerColor = theme.surfaceColor.copy(alpha = 0.5f)
+                        disabledContainerColor = theme.surfaceColor.copy(alpha = theme.alphaMedium)
                     )
                 )
             }
