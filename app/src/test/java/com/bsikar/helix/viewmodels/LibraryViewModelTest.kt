@@ -5,13 +5,17 @@ import com.bsikar.helix.data.LibraryManager
 import com.bsikar.helix.data.model.Book
 import com.bsikar.helix.data.model.PresetTags
 import com.bsikar.helix.data.model.ReadingStatus
+import io.mockk.any
 import io.mockk.every
+import io.mockk.justRun
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.TestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -30,6 +34,7 @@ class LibraryViewModelTest {
     private lateinit var testDispatcher: TestDispatcher
     private lateinit var libraryManager: LibraryManager
     private lateinit var viewModel: LibraryViewModel
+    private lateinit var booksFlow: MutableStateFlow<List<Book>>
 
     // Test data
     private val testBooks = listOf(
@@ -71,10 +76,15 @@ class LibraryViewModelTest {
         Dispatchers.setMain(testDispatcher)
 
         libraryManager = mockk<LibraryManager>(relaxed = true)
-        
-        // Mock the books state from LibraryManager  
+        booksFlow = MutableStateFlow(testBooks)
+
+        // Mock the books state from LibraryManager
         every { libraryManager.books } returns androidx.compose.runtime.mutableStateOf(testBooks)
-        
+        every { libraryManager.getBooksFlow() } returns booksFlow
+        justRun { libraryManager.rescanWatchedDirectoriesAsync(any()) }
+        justRun { libraryManager.removeBook(any()) }
+        justRun { libraryManager.updateBookTags(any(), any()) }
+
         viewModel = LibraryViewModel(libraryManager)
     }
 
@@ -95,10 +105,22 @@ class LibraryViewModelTest {
     @Test
     fun `updateSearchQuery should update search state`() = runTest {
         val testQuery = "test search"
-        
+
         viewModel.updateSearchQuery(testQuery)
-        
+
         assertEquals(testQuery, viewModel.searchQuery.value)
+    }
+
+    @Test
+    fun `updateSearchQuery sanitizes input`() = runTest {
+        val unsanitized = "   test\nquery\u0007 with   extra   spaces" + "x".repeat(200)
+
+        viewModel.updateSearchQuery(unsanitized)
+
+        val expectedPrefix = "test query with extra spaces"
+        val expected = (expectedPrefix + "x".repeat(200)).take(120)
+        assertEquals(expected.length, viewModel.searchQuery.value.length)
+        assertEquals(expected, viewModel.searchQuery.value)
     }
 
     @Test
@@ -172,6 +194,31 @@ class LibraryViewModelTest {
         
         viewModel.updateBookTags(bookId, newTags)
         verify { libraryManager.updateBookTags(bookId, newTags) }
+    }
+
+    @Test
+    fun `toggleTagFilter ignores blank ids`() = runTest {
+        viewModel.toggleTagFilter("  ")
+        assertTrue(viewModel.activeTagFilters.value.isEmpty())
+
+        viewModel.toggleTagFilter("action")
+        viewModel.toggleTagFilter("action")
+        assertTrue(viewModel.activeTagFilters.value.isEmpty())
+    }
+
+    @Test
+    fun `filteredLibraryBooks handles empty tags safely`() = runTest {
+        val bookWithBlankTag = testBooks.first().copy(tags = listOf("action", ""))
+        booksFlow.value = listOf(bookWithBlankTag, testBooks[1])
+
+        advanceUntilIdle()
+
+        viewModel.toggleTagFilter("action")
+        advanceUntilIdle()
+
+        val filtered = viewModel.filteredLibraryBooks.value
+        assertEquals(1, filtered.size)
+        assertEquals(bookWithBlankTag.id, filtered.first().id)
     }
 
     @Test
