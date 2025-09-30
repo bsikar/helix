@@ -2,10 +2,15 @@
     <string name="app_name">Helix</string>
     
     <!-- Navigation -->
+    <string name="home">Home</string>
+    <string name="playing">Playing</string>
     <string name="library">Library</string>
     <string name="recents">Recents</string>
     <string name="browse">Browse</string>
     <string name="settings">Settings</string>
+    <string name="search">Search</string>
+    <string name="audiobook_player">Audiobook Player</string>
+    <string name="ebook_reader">E-book Reader</string>
     
     <!-- Reading Status -->
     <string name="reading">Reading</string>
@@ -73,6 +78,18 @@
     <string name="add_bookmark">Add Bookmark</string>
     <string name="bookmark_added">Bookmark added</string>
     <string name="bookmark_removed">Bookmark removed</string>
+
+    <!-- Player controls -->
+    <string name="open_audiobook_player">Open Audiobook Player</string>
+    <string name="open_ebook_reader">Open E-book Reader</string>
+    <string name="stop_playback">Stop Playback</string>
+    <string name="pause_playback">Pause</string>
+    <string name="resume_playback">Resume</string>
+    <string name="no_audiobook_playing">No audiobook playing</string>
+    <string name="playing_format">Playing: %1$s</string>
+    <string name="paused_format">Paused: %1$s</string>
+    <string name="sample_audiobook_title">The Fellowship of the Ring</string>
+    <string name="sample_reader_content">Chapter 1: A Long-Expected Party</string>
     
     <!-- Error Messages -->
     <string name="error_occurred">An error occurred</string>

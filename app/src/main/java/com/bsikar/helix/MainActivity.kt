@@ -1,73 +1,118 @@
 package com.bsikar.helix
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.*
-import androidx.compose.ui.graphics.luminance
-import androidx.core.view.WindowCompat
-import androidx.hilt.navigation.compose.hiltViewModel
-import com.bsikar.helix.data.UserPreferencesManager
-import com.bsikar.helix.managers.ImportManager
-import com.bsikar.helix.theme.ThemeManager
-import com.bsikar.helix.theme.ThemeMode
-import com.bsikar.helix.ui.screens.MainApp
-import com.bsikar.helix.viewmodels.LibraryViewModel
-import com.google.accompanist.systemuicontroller.rememberSystemUiController
+import androidx.activity.viewModels
+import android.view.Menu
+import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.content.res.AppCompatResources
+import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.DrawableCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.navigation.NavController
+import androidx.navigation.fragment.NavHostFragment
+import androidx.navigation.ui.NavigationUI
+import androidx.navigation.ui.setupWithNavController
+import com.bsikar.helix.viewmodels.PlayerViewModel
+import com.bsikar.helix.viewmodels.PlayerViewModel.PlaybackState
+import com.google.android.material.bottomnavigation.BottomNavigationView
 import dagger.hilt.android.AndroidEntryPoint
-import javax.inject.Inject
+import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
-class MainActivity : ComponentActivity() {
-    
-    @Inject
-    lateinit var preferencesManager: UserPreferencesManager
-    
-    @Inject
-    lateinit var importManager: ImportManager
-    
+class MainActivity : AppCompatActivity() {
+
+    private val playerViewModel: PlayerViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
 
-        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val navHostFragment = supportFragmentManager
+            .findFragmentById(R.id.nav_host_fragment) as NavHostFragment
+        val navController = navHostFragment.navController
 
-        setContent {
-            val libraryViewModel: LibraryViewModel = hiltViewModel()
-            val userPreferences by preferencesManager.preferences
-            val theme = ThemeManager.getTheme(userPreferences.themeMode)
+        val bottomNavView: BottomNavigationView = findViewById(R.id.bottom_nav_view)
+        bottomNavView.setupWithNavController(navController)
 
-            val systemUiController = rememberSystemUiController()
-            LaunchedEffect(userPreferences.themeMode, theme) {
-                val isLight = when (userPreferences.themeMode) {
-                    ThemeMode.LIGHT, ThemeMode.SEPIA, ThemeMode.WARM, ThemeMode.COOL -> true
-                    ThemeMode.DARK, ThemeMode.NIGHT_MODE -> false
-                    ThemeMode.HIGH_CONTRAST -> true
-                    ThemeMode.SYSTEM -> theme == ThemeManager.lightTheme
-                    ThemeMode.DYNAMIC -> theme.colorScheme?.background?.luminance() ?: 0.5f > 0.5f
+        val playingMenuItem = bottomNavView.menu.add(
+            Menu.NONE,
+            R.id.nav_playing,
+            1,
+            getString(R.string.playing)
+        )
+        playingMenuItem.icon = AppCompatResources.getDrawable(this, R.drawable.ic_headphones)
+        playingMenuItem.isVisible = false
+        playingMenuItem.isCheckable = false
+
+        configureBottomNav(bottomNavView, navController)
+        observePlaybackState(bottomNavView)
+    }
+
+    private fun configureBottomNav(
+        bottomNavView: BottomNavigationView,
+        navController: NavController
+    ) {
+        bottomNavView.setOnItemSelectedListener { item ->
+            when (item.itemId) {
+                R.id.nav_playing -> {
+                    navController.navigate(R.id.audiobookPlayerFragment)
+                    false
                 }
-                
-                systemUiController.setSystemBarsColor(
-                    color = theme.backgroundColor,
-                    darkIcons = isLight,
-                    isNavigationBarContrastEnforced = false
-                )
-                systemUiController.navigationBarDarkContentEnabled = isLight
+                else -> {
+                    NavigationUI.onNavDestinationSelected(item, navController)
+                    true
+                }
             }
+        }
 
-            // Use Material 3 theme with proper color scheme
-            MaterialTheme(
-                colorScheme = theme.colorScheme ?: ThemeManager.lightTheme.colorScheme!!
-            ) {
-                MainApp(
-                    currentTheme = userPreferences.themeMode,
-                    onThemeChange = { newTheme -> preferencesManager.updateTheme(newTheme) },
-                    theme = theme,
-                    preferencesManager = preferencesManager,
-                    libraryViewModel = libraryViewModel,
-                    importManager = importManager
-                )
+        bottomNavView.setOnItemReselectedListener { item ->
+            if (item.itemId == R.id.nav_playing) {
+                navController.navigate(R.id.audiobookPlayerFragment)
             }
         }
     }
+
+    private fun observePlaybackState(bottomNavView: BottomNavigationView) {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                playerViewModel.playbackState.collect { state ->
+                    val playingItem = bottomNavView.menu.findItem(R.id.nav_playing)
+                    val iconDrawable = playingItem.icon ?: AppCompatResources.getDrawable(
+                        this@MainActivity,
+                        R.drawable.ic_headphones
+                    )
+                    val highlightColor = ContextCompat.getColor(this@MainActivity, R.color.teal_200)
+                    val defaultColor = ContextCompat.getColor(this@MainActivity, R.color.white)
+
+                    when (state) {
+                        is PlaybackState.Playing, is PlaybackState.Paused -> {
+                            playingItem.isVisible = true
+                            val badge = bottomNavView.getOrCreateBadge(R.id.nav_playing)
+                            badge.backgroundColor = highlightColor
+                            badge.badgeTextColor = defaultColor
+                            badge.isVisible = true
+                            badge.clearNumber()
+                            if (iconDrawable != null) {
+                                val wrapped = DrawableCompat.wrap(iconDrawable.mutate())
+                                DrawableCompat.setTint(wrapped, highlightColor)
+                                playingItem.icon = wrapped
+                            }
+                        }
+                        is PlaybackState.Stopped -> {
+                            playingItem.isVisible = false
+                            bottomNavView.removeBadge(R.id.nav_playing)
+                            if (iconDrawable != null) {
+                                val wrapped = DrawableCompat.wrap(iconDrawable.mutate())
+                                DrawableCompat.setTint(wrapped, defaultColor)
+                                playingItem.icon = wrapped
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
 }
