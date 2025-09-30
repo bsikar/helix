@@ -2,20 +2,18 @@ package com.bsikar.helix.ui.screens
 
 import androidx.compose.runtime.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.bsikar.helix.R
 import com.bsikar.helix.data.model.Book
 import com.bsikar.helix.data.model.UiState
-import com.bsikar.helix.data.model.ReadingStatus
 import com.bsikar.helix.data.UserPreferencesManager
 import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.theme.ThemeMode
+import com.bsikar.helix.ui.components.PersistentAudioBar
+import com.bsikar.helix.viewmodels.AudioBookReaderViewModel
 import com.bsikar.helix.viewmodels.LibraryViewModel
 import com.bsikar.helix.viewmodels.ReaderViewModel
 import com.bsikar.helix.managers.ImportManager
@@ -29,14 +27,7 @@ fun MainApp(
     libraryViewModel: LibraryViewModel,
     importManager: ImportManager? = null
 ) {
-    var selectedTab by remember { mutableStateOf(0) }
-    
-    // Redirect any tab 3 selections to tab 0 (Library) since we removed the Listening tab
-    LaunchedEffect(selectedTab) {
-        if (selectedTab >= 3) {
-            selectedTab = 0
-        }
-    }
+    val audioBookViewModel: AudioBookReaderViewModel = hiltViewModel()
     var showSettings by remember { mutableStateOf(false) }
     var settingsScrollTarget by remember { mutableStateOf<String?>(null) }
     var currentBook by remember { mutableStateOf<Book?>(null) }
@@ -47,10 +38,12 @@ fun MainApp(
     val readingBooks by libraryViewModel.filteredReadingBooks.collectAsState()
     val onDeckBooks by libraryViewModel.filteredOnDeckBooks.collectAsState()
     val completedBooks by libraryViewModel.filteredCompletedBooks.collectAsState()
-    val recentBooks by libraryViewModel.recentBooks.collectAsState()
     val libraryState by libraryViewModel.libraryState.collectAsState()
     val errorMessage by libraryViewModel.errorMessage.collectAsState()
     val searchQuery by libraryViewModel.searchQuery.collectAsState()
+    val contentFilter by libraryViewModel.contentFilter.collectAsState()
+    val activeSecondaryFilters by libraryViewModel.activeSecondaryFilters.collectAsState()
+    val playbackState by audioBookViewModel.playbackState.collectAsState()
     
     // Collect sorting states
     val readingSortAscending by libraryViewModel.readingSortAscending.collectAsState()
@@ -117,9 +110,10 @@ fun MainApp(
                 AudioBookReaderScreen(
                     book = currentBook!!,
                     theme = theme,
-                    onBackClick = { 
-                        currentBook = null 
-                    }
+                    onBackClick = {
+                        currentBook = null
+                    },
+                    viewModel = audioBookViewModel
                 )
             } else {
                 val readerViewModel: ReaderViewModel = hiltViewModel()
@@ -145,10 +139,15 @@ fun MainApp(
             }
         }
         else -> {
-            when (selectedTab) {
-                0 -> LibraryScreen(
-                    selectedTab = selectedTab,
-                    onTabSelected = { newTab -> if (newTab in 0..2) selectedTab = newTab },
+            val fallbackAudiobook = allBooks
+                .filter { it.isAudiobook() }
+                .filter { it.progress > 0f && it.progress < 1f }
+                .maxByOrNull { it.lastReadTimestamp }
+            val currentlyPlayingAudiobook = playbackState.currentBook ?: fallbackAudiobook
+            val persistentBarVisible = playbackState.isPlaying && playbackState.currentBook != null
+
+            Box(modifier = Modifier.fillMaxSize()) {
+                LibraryScreen(
                     currentTheme = currentTheme,
                     onThemeChange = onThemeChange,
                     theme = theme,
@@ -156,11 +155,13 @@ fun MainApp(
                     onDeckBooks = onDeckBooks,
                     completedBooks = completedBooks,
                     allBooks = allBooks,
-                    currentlyPlayingAudiobook = allBooks
-                        .filter { it.isAudiobook() }
-                        .filter { it.progress > 0f && it.progress < 1f } // Has been started but not completed
-                        .maxByOrNull { it.lastReadTimestamp }, // Most recently accessed
-                    onNavigateToSettings = { 
+                    currentlyPlayingAudiobook = currentlyPlayingAudiobook,
+                    contentFilter = contentFilter,
+                    onContentFilterChange = { libraryViewModel.setContentFilter(it) },
+                    activeSecondaryFilters = activeSecondaryFilters,
+                    onToggleSecondaryFilter = { libraryViewModel.toggleSecondaryFilter(it) },
+                    onClearSecondaryFilters = { libraryViewModel.clearSecondaryFilters() },
+                    onNavigateToSettings = {
                         showSettings = true
                         settingsScrollTarget = null
                     },
@@ -182,90 +183,31 @@ fun MainApp(
                     errorMessage = errorMessage,
                     searchQuery = searchQuery,
                     onSearchQueryChange = { query -> libraryViewModel.updateSearchQuery(query) },
-                    // Sorting parameters
                     readingSortAscending = readingSortAscending,
                     onDeckSortAscending = onDeckSortAscending,
                     completedSortAscending = completedSortAscending,
                     onToggleReadingSort = { libraryViewModel.toggleReadingSortOrder() },
                     onToggleOnDeckSort = { libraryViewModel.toggleOnDeckSortOrder() },
                     onToggleCompletedSort = { libraryViewModel.toggleCompletedSortOrder() },
-                    onRefresh = { libraryViewModel.refreshBooks() }
+                    onRefresh = { libraryViewModel.refreshBooks() },
+                    extraBottomPadding = if (persistentBarVisible) 88.dp else 0.dp
                 )
-                1 -> RecentsScreen(
-                    selectedTab = selectedTab,
-                    onTabSelected = { newTab -> if (newTab in 0..2) selectedTab = newTab },
-                    theme = theme,
-                    recentBooks = recentBooks,
-                    onNavigateToSettings = { showSettings = true },
-                    onBookClick = { book -> currentBook = book },
-                    onStartReading = { bookId -> libraryViewModel.startReading(bookId) },
-                    onMarkCompleted = { bookId -> libraryViewModel.markAsCompleted(bookId) },
-                    onMoveToOnDeck = { bookId -> libraryViewModel.moveToOnDeck(bookId) },
-                    onSetProgress = { bookId, progress -> libraryViewModel.setBookProgress(bookId, progress) },
-                    onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) },
-                    onRefresh = { libraryViewModel.refreshBooks() }
-                )
-                2 -> BrowseScreen(
-                    selectedTab = selectedTab,
-                    onTabSelected = { newTab -> if (newTab in 0..2) selectedTab = newTab },
-                    theme = theme,
-                    onNavigateToSettings = { showSettings = true },
-                    onBookClick = { book -> currentBook = book },
-                    onSeeAllClick = { title, books -> seeAllData = title to books },
-                    allBooks = allBooks,
-                    onStartReading = { bookId -> libraryViewModel.startReading(bookId) },
-                    onMarkCompleted = { bookId -> libraryViewModel.markAsCompleted(bookId) },
-                    onMoveToOnDeck = { bookId -> libraryViewModel.moveToOnDeck(bookId) },
-                    onSetProgress = { bookId, progress -> libraryViewModel.setBookProgress(bookId, progress) },
-                    onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) },
-                    onUpdateBookSettings = { book -> libraryViewModel.updateBookSettings(book) },
-                    onRemoveFromLibrary = { bookId -> libraryViewModel.removeBook(bookId) },
-                    onRefresh = { libraryViewModel.refreshBooks() }
-                )
-                else -> LibraryScreen(
-                    selectedTab = 0, // Force to tab 0 when in unknown state
-                    onTabSelected = { newTab -> if (newTab in 0..2) selectedTab = newTab },
-                    currentTheme = currentTheme,
-                    onThemeChange = onThemeChange,
-                    theme = theme,
-                    readingBooks = readingBooks,
-                    onDeckBooks = onDeckBooks,
-                    completedBooks = completedBooks,
-                    allBooks = allBooks,
-                    currentlyPlayingAudiobook = allBooks
-                        .filter { it.isAudiobook() }
-                        .filter { it.progress > 0f && it.progress < 1f } // Has been started but not completed
-                        .maxByOrNull { it.lastReadTimestamp }, // Most recently accessed
-                    onNavigateToSettings = { 
-                        showSettings = true
-                        settingsScrollTarget = null
-                    },
-                    onNavigateToProgressSettings = {
-                        showSettings = true
-                        settingsScrollTarget = "progress"
-                    },
-                    onBookClick = { book -> currentBook = book },
-                    onSeeAllClick = { title, books -> seeAllData = title to books },
-                    onStartReading = { bookId -> libraryViewModel.startReading(bookId) },
-                    onMarkCompleted = { bookId -> libraryViewModel.markAsCompleted(bookId) },
-                    onMoveToOnDeck = { bookId -> libraryViewModel.moveToOnDeck(bookId) },
-                    onSetProgress = { bookId, progress -> libraryViewModel.setBookProgress(bookId, progress) },
-                    onEditTags = { bookId, newTags -> libraryViewModel.updateBookTags(bookId, newTags) },
-                    onUpdateBookSettings = { book -> libraryViewModel.updateBookSettings(book) },
-                    libraryManager = libraryViewModel.libraryManager,
-                    libraryState = libraryState,
-                    errorMessage = errorMessage,
-                    searchQuery = searchQuery,
-                    onSearchQueryChange = { query -> libraryViewModel.updateSearchQuery(query) },
-                    // Sorting parameters
-                    readingSortAscending = readingSortAscending,
-                    onDeckSortAscending = onDeckSortAscending,
-                    completedSortAscending = completedSortAscending,
-                    onToggleReadingSort = { libraryViewModel.toggleReadingSortOrder() },
-                    onToggleOnDeckSort = { libraryViewModel.toggleOnDeckSortOrder() },
-                    onToggleCompletedSort = { libraryViewModel.toggleCompletedSortOrder() },
-                    onRefresh = { libraryViewModel.refreshBooks() }
-                )
+
+                if (persistentBarVisible) {
+                    PersistentAudioBar(
+                        playbackState = playbackState,
+                        theme = theme,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth(),
+                        onExpand = {
+                            playbackState.currentBook?.let { book ->
+                                currentBook = book
+                            }
+                        },
+                        onPlayPause = { audioBookViewModel.togglePlayPause() }
+                    )
+                }
             }
         }
     }

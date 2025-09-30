@@ -61,7 +61,26 @@
     <string name="found_new_books">Found %d new books!</string>
     <string name="no_new_books_found">No new books found</string>
     <string name="scan_failed">Scan failed: %s</string>
-    
+
+    <!-- Filters -->
+    <string name="filter_all_content">All</string>
+    <string name="filter_text_only">Text</string>
+    <string name="filter_audio_only">Audio</string>
+    <string name="filter_refine_results">Refine results</string>
+    <string name="filter_clear">Clear</string>
+
+    <!-- Unified library sections -->
+    <string name="section_in_progress_all">In Progress</string>
+    <string name="section_in_progress_text">Reading</string>
+    <string name="section_in_progress_audio">Listening</string>
+    <string name="section_in_progress_subtitle_all">Last activity</string>
+    <string name="section_in_progress_subtitle_text">Last read</string>
+    <string name="section_in_progress_subtitle_audio">Last played</string>
+    <string name="section_on_deck_all">On Deck</string>
+    <string name="section_on_deck_audio">Listening Queue</string>
+    <string name="section_completed_all">Finished</string>
+    <string name="section_completed_audio">Finished Listening</string>
+
     <!-- Import -->
     <string name="import_epub">Import EPUB</string>
     <string name="importing">Importing...</string>

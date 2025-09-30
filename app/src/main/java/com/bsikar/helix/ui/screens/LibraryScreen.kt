@@ -2,6 +2,8 @@ package com.bsikar.helix.ui.screens
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -15,9 +17,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.layout.ContentScale
@@ -25,10 +29,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import coil.compose.AsyncImage
 import com.bsikar.helix.R
 import com.bsikar.helix.data.model.Book
-import com.bsikar.helix.data.model.ReadingStatus
+import com.bsikar.helix.data.model.Tag
 import com.bsikar.helix.data.model.UiState
-import com.bsikar.helix.viewmodels.AudioBookReaderViewModel
-import com.bsikar.helix.data.ImportProgress
+import com.bsikar.helix.data.model.TagCategory
 import com.bsikar.helix.data.LibraryManager
 import com.bsikar.helix.theme.AppTheme
 import com.bsikar.helix.theme.ThemeMode
@@ -40,16 +43,14 @@ import com.bsikar.helix.ui.components.ResponsiveBookCard
 import com.bsikar.helix.ui.components.getWindowSizeClass
 import com.bsikar.helix.ui.components.WindowSizeClass
 import com.bsikar.helix.ui.components.ImportProgressIndicator
-import com.bsikar.helix.ui.components.CompactImportProgress
 import com.bsikar.helix.ui.components.ResponsiveSpacing
 import com.bsikar.helix.managers.ImportManager
+import com.bsikar.helix.viewmodels.LibraryContentFilter
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
-    selectedTab: Int,
-    onTabSelected: (Int) -> Unit,
     currentTheme: ThemeMode,
     onThemeChange: (ThemeMode) -> Unit,
     theme: AppTheme,
@@ -58,6 +59,11 @@ fun LibraryScreen(
     completedBooks: List<com.bsikar.helix.data.model.Book>,
     allBooks: List<com.bsikar.helix.data.model.Book>,
     currentlyPlayingAudiobook: Book? = null,
+    contentFilter: LibraryContentFilter,
+    onContentFilterChange: (LibraryContentFilter) -> Unit,
+    activeSecondaryFilters: Set<String>,
+    onToggleSecondaryFilter: (String) -> Unit,
+    onClearSecondaryFilters: () -> Unit,
     onNavigateToSettings: () -> Unit = {},
     onNavigateToProgressSettings: () -> Unit = {},
     onBookClick: (Book) -> Unit = {},
@@ -82,7 +88,8 @@ fun LibraryScreen(
     onToggleReadingSort: () -> Unit = {},
     onToggleOnDeckSort: () -> Unit = {},
     onToggleCompletedSort: () -> Unit = {},
-    onRefresh: () -> Unit = {}
+    onRefresh: () -> Unit = {},
+    extraBottomPadding: Dp = 0.dp
 ) {
     // Search query now comes from ViewModel instead of local state
     val scope = rememberCoroutineScope()
@@ -106,7 +113,7 @@ fun LibraryScreen(
     LaunchedEffect(readingBooksKey) { internalReadingBooks = readingBooks }
     LaunchedEffect(onDeckBooksKey) { internalOnDeckBooks = onDeckBooks }
     LaunchedEffect(completedBooksKey) { internalCompletedBooks = completedBooks }
-    
+
     // Function to update a book in the appropriate list
     val updateBookInLists = { updatedBook: com.bsikar.helix.data.model.Book ->
         // Update in reading books
@@ -144,12 +151,45 @@ fun LibraryScreen(
     val handleDismissImport: (String) -> Unit = { importId ->
         // Import will be automatically removed from active list when completed
     }
-    
+
     // Pull-to-refresh functionality
     
     // Responsive configuration
     val responsiveConfig = ResponsiveConfig.fromScreenWidth()
     val windowSizeClass = getWindowSizeClass()
+
+    val availableTextFilters = remember(allBooks) {
+        allBooks
+            .filter { !it.isAudiobook() }
+            .flatMap { it.getTagsByCategory(TagCategory.FORMAT) }
+            .distinctBy { it.id }
+            .sortedBy { it.name }
+    }
+
+    val availableAudioFilters = remember(allBooks) {
+        allBooks
+            .filter { it.isAudiobook() }
+            .flatMap { book ->
+                book.getTagObjects().filter { it.category == TagCategory.GENRE }
+            }
+            .distinctBy { it.id }
+            .sortedBy { it.name }
+    }
+
+    val secondaryFilterGroups = remember(contentFilter, availableTextFilters, availableAudioFilters) {
+        when (contentFilter) {
+            LibraryContentFilter.ALL -> mapOf(
+                "Formats" to availableTextFilters,
+                "Genres" to availableAudioFilters
+            )
+            LibraryContentFilter.TEXT_ONLY -> mapOf(
+                "Formats" to availableTextFilters
+            )
+            LibraryContentFilter.AUDIO_ONLY -> mapOf(
+                "Genres" to availableAudioFilters
+            )
+        }
+    }
     
     // Function to render books responsively
     @Composable
@@ -243,75 +283,9 @@ fun LibraryScreen(
                     }
                 }
             )
-        },
-        bottomBar = {
-            NavigationBar(
-                containerColor = theme.surfaceColor,
-                tonalElevation = 8.dp
-            ) {
-                NavigationBarItem(
-                    selected = selectedTab == 0,
-                    onClick = { onTabSelected(0) },
-                    icon = {
-                        Icon(
-                            Icons.AutoMirrored.Filled.LibraryBooks,
-                            contentDescription = stringResource(R.string.cd_library),
-                            tint = if (selectedTab == 0) theme.accentColor else theme.secondaryTextColor
-                        )
-                    },
-                    label = {
-                        Text(
-                            stringResource(R.string.library),
-                            color = if (selectedTab == 0) theme.accentColor else theme.secondaryTextColor
-                        )
-                    },
-                    colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = Color.Transparent
-                    )
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 1,
-                    onClick = { onTabSelected(1) },
-                    icon = {
-                        Icon(
-                            Icons.Filled.Schedule,
-                            contentDescription = stringResource(R.string.cd_recents),
-                            tint = if (selectedTab == 1) theme.accentColor else theme.secondaryTextColor
-                        )
-                    },
-                    label = {
-                        Text(
-                            stringResource(R.string.recents),
-                            color = if (selectedTab == 1) theme.accentColor else theme.secondaryTextColor
-                        )
-                    },
-                    colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = Color.Transparent
-                    )
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 2,
-                    onClick = { onTabSelected(2) },
-                    icon = {
-                        Icon(
-                            Icons.Filled.Search,
-                            contentDescription = stringResource(R.string.cd_browse),
-                            tint = if (selectedTab == 2) theme.accentColor else theme.secondaryTextColor
-                        )
-                    },
-                    label = {
-                        Text(
-                            stringResource(R.string.browse),
-                            color = if (selectedTab == 2) theme.accentColor else theme.secondaryTextColor
-                        )
-                    },
-                    colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = Color.Transparent
-                    )
-                )
-            }
         }
     ) { innerPadding ->
+        val layoutDirection = LocalLayoutDirection.current
         // Handle UiState for library operations
         when (libraryState) {
             is UiState.Loading -> {
@@ -388,9 +362,16 @@ fun LibraryScreen(
                     onRefresh = { handleRefresh() },
                     state = pullToRefreshState
                 ) {
+                    val combinedPadding = PaddingValues(
+                        start = innerPadding.calculateStartPadding(layoutDirection),
+                        top = innerPadding.calculateTopPadding(),
+                        end = innerPadding.calculateEndPadding(layoutDirection),
+                        bottom = innerPadding.calculateBottomPadding() + extraBottomPadding
+                    )
+
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = innerPadding,
+                        contentPadding = combinedPadding,
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
 
@@ -401,7 +382,33 @@ fun LibraryScreen(
                     theme = theme
                 )
             }
-            
+
+            item(key = "content_filters") {
+                ContentFilterRow(
+                    theme = theme,
+                    currentFilter = contentFilter,
+                    onFilterSelected = onContentFilterChange,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = ResponsiveSpacing.medium())
+                )
+            }
+
+            if (secondaryFilterGroups.values.any { it.isNotEmpty() }) {
+                item(key = "secondary_filters") {
+                    SecondaryFilterSection(
+                        theme = theme,
+                        filterGroups = secondaryFilterGroups,
+                        activeFilters = activeSecondaryFilters,
+                        onToggleFilter = onToggleSecondaryFilter,
+                        onClearFilters = onClearSecondaryFilters,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = ResponsiveSpacing.medium())
+                    )
+                }
+            }
+
             // Show import progress using the new ImportManager
             if (importProgress.isNotEmpty()) {
                 item(key = "import_progress") {
@@ -416,50 +423,24 @@ fun LibraryScreen(
             }
             
 
-            // Reading section (text-based books) - only show if there are books currently being read
-            val textBooks = internalReadingBooks.filter { !it.isAudiobook() }
-            
-            if (textBooks.isNotEmpty()) {
-                item(key = "reading_header") {
-                    LibrarySectionHeader(
-                        title = "Reading",
-                        subtitle = "Last read",
-                        theme = theme,
-                        isAscending = readingSortAscending,
-                        onSortClick = onToggleReadingSort,
-                        onSeeAllClick = { onSeeAllClick("Reading", textBooks) }
-                    )
-                }
-                item(key = "reading_books_${textBooks.size}") {
-                    ResponsiveBookSection(
-                        books = textBooks,
-                        showProgress = true
-                    )
-                }
+            val inProgressTitleRes = when (contentFilter) {
+                LibraryContentFilter.TEXT_ONLY -> R.string.section_in_progress_text
+                LibraryContentFilter.AUDIO_ONLY -> R.string.section_in_progress_audio
+                LibraryContentFilter.ALL -> R.string.section_in_progress_all
             }
-            
-            // Listening section (audiobooks) - show audiobooks that are being listened to
-            val listeningBooks = allBooks.filter { 
-                it.isAudiobook() && it.readingStatus == ReadingStatus.LISTENING
-            }.sortedByDescending { it.lastReadTimestamp }
-            val audioBooks = allBooks.filter { it.isAudiobook() }
-            
-            // Show listening section if there's a currently playing audiobook OR other listening books
-            val hasListeningContent = currentlyPlayingAudiobook != null || listeningBooks.isNotEmpty()
-            
-            if (hasListeningContent) {
-                item(key = "listening_header") {
-                    LibrarySectionHeader(
-                        title = "Listening",
-                        subtitle = "Last played",
-                        theme = theme,
-                        isAscending = false,
-                        onSortClick = { },
-                        onSeeAllClick = { onSeeAllClick("Listening", audioBooks) }
-                    )
-                }
-                
-                // Show currently playing audiobook if available
+            val inProgressSubtitleRes = when (contentFilter) {
+                LibraryContentFilter.TEXT_ONLY -> R.string.section_in_progress_subtitle_text
+                LibraryContentFilter.AUDIO_ONLY -> R.string.section_in_progress_subtitle_audio
+                LibraryContentFilter.ALL -> R.string.section_in_progress_subtitle_all
+            }
+
+            val inProgressBooks = if (currentlyPlayingAudiobook != null && contentFilter != LibraryContentFilter.TEXT_ONLY) {
+                internalReadingBooks.filterNot { it.id == currentlyPlayingAudiobook.id }
+            } else {
+                internalReadingBooks
+            }
+
+            if (contentFilter != LibraryContentFilter.TEXT_ONLY) {
                 currentlyPlayingAudiobook?.let { book ->
                     item(key = "currently_playing") {
                         CurrentlyPlayingCard(
@@ -470,28 +451,41 @@ fun LibraryScreen(
                         )
                     }
                 }
-                
-                // Show other listening books (excluding the currently playing one)
-                val otherListeningBooks = listeningBooks.filter { it.id != currentlyPlayingAudiobook?.id }
-                if (otherListeningBooks.isNotEmpty()) {
-                    item(key = "listening_books_${otherListeningBooks.size}") {
-                        ResponsiveBookSection(
-                            books = otherListeningBooks,
-                            showProgress = true
-                        )
-                    }
+            }
+
+            if (inProgressBooks.isNotEmpty()) {
+                val sectionKey = "in_progress_books_${inProgressBooks.size}"
+                item(key = "in_progress_header") {
+                    LibrarySectionHeader(
+                        title = stringResource(id = inProgressTitleRes),
+                        subtitle = stringResource(id = inProgressSubtitleRes),
+                        theme = theme,
+                        isAscending = readingSortAscending,
+                        onSortClick = onToggleReadingSort,
+                        onSeeAllClick = { onSeeAllClick(stringResource(id = inProgressTitleRes), inProgressBooks) }
+                    )
+                }
+                item(key = sectionKey) {
+                    ResponsiveBookSection(
+                        books = inProgressBooks,
+                        showProgress = true
+                    )
                 }
             }
 
             if (internalOnDeckBooks.isNotEmpty()) {
+                val onDeckTitleRes = when (contentFilter) {
+                    LibraryContentFilter.AUDIO_ONLY -> R.string.section_on_deck_audio
+                    else -> R.string.section_on_deck_all
+                }
                 item(key = "plan_to_read_header") {
                     LibrarySectionHeader(
-                        title = "On Deck",
+                        title = stringResource(id = onDeckTitleRes),
                         subtitle = "Title",
                         theme = theme,
                         isAscending = onDeckSortAscending,
                         onSortClick = onToggleOnDeckSort,
-                        onSeeAllClick = { onSeeAllClick("On Deck", internalOnDeckBooks) }
+                        onSeeAllClick = { onSeeAllClick(stringResource(id = onDeckTitleRes), internalOnDeckBooks) }
                     )
                 }
                 item(key = "on_deck_books_${internalOnDeckBooks.size}") {
@@ -503,14 +497,18 @@ fun LibraryScreen(
             }
 
             if (internalCompletedBooks.isNotEmpty()) {
+                val completedTitleRes = when (contentFilter) {
+                    LibraryContentFilter.AUDIO_ONLY -> R.string.section_completed_audio
+                    else -> R.string.section_completed_all
+                }
                 item(key = "read_header") {
                     LibrarySectionHeader(
-                        title = "Finished",
+                        title = stringResource(id = completedTitleRes),
                         subtitle = "Title",
                         theme = theme,
                         isAscending = completedSortAscending,
                         onSortClick = onToggleCompletedSort,
-                        onSeeAllClick = { onSeeAllClick("Finished", internalCompletedBooks) }
+                        onSeeAllClick = { onSeeAllClick(stringResource(id = completedTitleRes), internalCompletedBooks) }
                     )
                 }
                 item(key = "read_books_${internalCompletedBooks.size}") {
@@ -566,6 +564,131 @@ fun LibraryScreen(
             LaunchedEffect(message) {
                 // Here you could show a Snackbar if you have a SnackbarHost
                 // For now, the error will be handled by the UiState.Error case above
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContentFilterRow(
+    theme: AppTheme,
+    currentFilter: LibraryContentFilter,
+    onFilterSelected: (LibraryContentFilter) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val filters = listOf(
+        Triple(LibraryContentFilter.ALL, Icons.AutoMirrored.Filled.LibraryBooks, stringResource(R.string.filter_all_content)),
+        Triple(LibraryContentFilter.TEXT_ONLY, Icons.Filled.MenuBook, stringResource(R.string.filter_text_only)),
+        Triple(LibraryContentFilter.AUDIO_ONLY, Icons.Filled.Headphones, stringResource(R.string.filter_audio_only))
+    )
+
+    Surface(
+        modifier = modifier,
+        color = Color.Transparent
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = ResponsiveSpacing.small()),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            filters.forEach { (filter, icon, label) ->
+                FilterChip(
+                    selected = currentFilter == filter,
+                    onClick = { onFilterSelected(filter) },
+                    label = {
+                        Text(
+                            text = label,
+                            color = if (currentFilter == filter) theme.accentColor else theme.primaryTextColor
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            icon,
+                            contentDescription = null,
+                            tint = if (currentFilter == filter) theme.accentColor else theme.secondaryTextColor
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = theme.accentColor.copy(alpha = 0.15f),
+                        selectedLabelColor = theme.accentColor,
+                        containerColor = theme.surfaceColor,
+                        labelColor = theme.primaryTextColor
+                    )
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SecondaryFilterSection(
+    theme: AppTheme,
+    filterGroups: Map<String, List<Tag>>,
+    activeFilters: Set<String>,
+    onToggleFilter: (String) -> Unit,
+    onClearFilters: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.padding(bottom = ResponsiveSpacing.small())) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = stringResource(R.string.filter_refine_results),
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = theme.primaryTextColor
+            )
+            if (activeFilters.isNotEmpty()) {
+                TextButton(onClick = onClearFilters) {
+                    Text(
+                        text = stringResource(R.string.filter_clear),
+                        color = theme.accentColor,
+                        fontSize = 13.sp
+                    )
+                }
+            }
+        }
+
+        filterGroups.forEach { (title, tags) ->
+            if (tags.isNotEmpty()) {
+                Text(
+                    text = title,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = theme.secondaryTextColor,
+                    modifier = Modifier.padding(vertical = 6.dp)
+                )
+
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    tags.forEach { tag ->
+                        val isSelected = activeFilters.contains(tag.id)
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = { onToggleFilter(tag.id) },
+                            label = {
+                                Text(
+                                    text = tag.name,
+                                    color = if (isSelected) theme.accentColor else theme.primaryTextColor
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = theme.accentColor.copy(alpha = 0.15f),
+                                selectedLabelColor = theme.accentColor,
+                                containerColor = theme.surfaceColor,
+                                labelColor = theme.primaryTextColor
+                            )
+                        )
+                    }
+                }
             }
         }
     }

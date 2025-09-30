@@ -3,13 +3,11 @@ package com.bsikar.helix.viewmodels
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bsikar.helix.data.model.Book
-import com.bsikar.helix.data.repository.BookRepository
 import com.bsikar.helix.data.LibraryManager
 import com.bsikar.helix.data.model.ReadingStatus
 import com.bsikar.helix.data.model.Tag
 import com.bsikar.helix.data.model.PresetTags
 import com.bsikar.helix.data.model.TagMatcher
-import com.bsikar.helix.data.UserPreferencesManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -25,9 +23,13 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import com.bsikar.helix.data.model.UiState
-import com.bsikar.helix.utils.safeCallWithUiState
-import com.bsikar.helix.utils.toUiState
 import com.bsikar.helix.ui.components.SearchUtils
+
+enum class LibraryContentFilter {
+    ALL,
+    AUDIO_ONLY,
+    TEXT_ONLY
+}
 
 @OptIn(FlowPreview::class)
 @HiltViewModel
@@ -42,6 +44,12 @@ class LibraryViewModel @Inject constructor(
     // Search and filtering state
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _contentFilter = MutableStateFlow(LibraryContentFilter.ALL)
+    val contentFilter: StateFlow<LibraryContentFilter> = _contentFilter.asStateFlow()
+
+    private val _activeSecondaryFilters = MutableStateFlow<Set<String>>(emptySet())
+    val activeSecondaryFilters: StateFlow<Set<String>> = _activeSecondaryFilters.asStateFlow()
     
     // Sorting state
     private val _readingSortAscending = MutableStateFlow(false)
@@ -149,13 +157,17 @@ class LibraryViewModel @Inject constructor(
     val filteredReadingBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = combine(
         readingBooks,
         debouncedSearchQuery,
-        readingSortAscending
-    ) { books, query, sortAscending ->
-        val filtered = if (query.isBlank()) {
-            books
+        readingSortAscending,
+        contentFilter,
+        activeSecondaryFilters
+    ) { books, query, sortAscending, filter, secondaryFilters ->
+        val filteredByType = applyContentFilter(books, filter)
+        val filteredByQuery = if (query.isBlank()) {
+            filteredByType
         } else {
-            searchBooks(books, query)
+            searchBooks(filteredByType, query)
         }
+        val filtered = applySecondaryFilters(filteredByQuery, secondaryFilters)
         // Sort properly by lastReadTimestamp instead of just reversing
         if (sortAscending) {
             filtered.sortedBy { it.lastReadTimestamp }
@@ -172,13 +184,17 @@ class LibraryViewModel @Inject constructor(
     val filteredOnDeckBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = combine(
         onDeckBooks,
         debouncedSearchQuery,
-        onDeckSortAscending
-    ) { books, query, sortAscending ->
-        val filtered = if (query.isBlank()) {
-            books
+        onDeckSortAscending,
+        contentFilter,
+        activeSecondaryFilters
+    ) { books, query, sortAscending, filter, secondaryFilters ->
+        val filteredByType = applyContentFilter(books, filter)
+        val filteredByQuery = if (query.isBlank()) {
+            filteredByType
         } else {
-            searchBooks(books, query)
+            searchBooks(filteredByType, query)
         }
+        val filtered = applySecondaryFilters(filteredByQuery, secondaryFilters)
         if (sortAscending) {
             filtered.sortedBy { it.title }
         } else {
@@ -194,13 +210,17 @@ class LibraryViewModel @Inject constructor(
     val filteredCompletedBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = combine(
         completedBooks,
         debouncedSearchQuery,
-        completedSortAscending
-    ) { books, query, sortAscending ->
-        val filtered = if (query.isBlank()) {
-            books
+        completedSortAscending,
+        contentFilter,
+        activeSecondaryFilters
+    ) { books, query, sortAscending, filter, secondaryFilters ->
+        val filteredByType = applyContentFilter(books, filter)
+        val filteredByQuery = if (query.isBlank()) {
+            filteredByType
         } else {
-            searchBooks(books, query)
+            searchBooks(filteredByType, query)
         }
+        val filtered = applySecondaryFilters(filteredByQuery, secondaryFilters)
         if (sortAscending) {
             filtered.sortedBy { it.title }
         } else {
@@ -441,6 +461,27 @@ class LibraryViewModel @Inject constructor(
         _searchQuery.value = query
     }
 
+    fun setContentFilter(filter: LibraryContentFilter) {
+        if (_contentFilter.value != filter) {
+            _contentFilter.value = filter
+            _activeSecondaryFilters.value = emptySet()
+        }
+    }
+
+    fun toggleSecondaryFilter(tagId: String) {
+        _activeSecondaryFilters.update { current ->
+            if (current.contains(tagId)) {
+                current - tagId
+            } else {
+                current + tagId
+            }
+        }
+    }
+
+    fun clearSecondaryFilters() {
+        _activeSecondaryFilters.value = emptySet()
+    }
+
     fun toggleReadingSortOrder() {
         _readingSortAscending.value = !_readingSortAscending.value
     }
@@ -456,7 +497,7 @@ class LibraryViewModel @Inject constructor(
     // Refresh functionality
     fun refreshLibrary() {
         if (_isRefreshing.value) return
-        
+
         _isRefreshing.value = true
         _scanMessage.value = "Scanning for new books..."
         
@@ -472,6 +513,31 @@ class LibraryViewModel @Inject constructor(
             viewModelScope.launch {
                 kotlinx.coroutines.delay(3000)
                 _scanMessage.value = ""
+            }
+        }
+    }
+
+    private fun applyContentFilter(
+        books: List<com.bsikar.helix.data.model.Book>,
+        filter: LibraryContentFilter
+    ): List<com.bsikar.helix.data.model.Book> {
+        return when (filter) {
+            LibraryContentFilter.ALL -> books
+            LibraryContentFilter.AUDIO_ONLY -> books.filter { it.isAudiobook() }
+            LibraryContentFilter.TEXT_ONLY -> books.filter { !it.isAudiobook() }
+        }
+    }
+
+    private fun applySecondaryFilters(
+        books: List<com.bsikar.helix.data.model.Book>,
+        secondaryFilters: Set<String>
+    ): List<com.bsikar.helix.data.model.Book> {
+        if (secondaryFilters.isEmpty()) return books
+
+        return books.filter { book ->
+            secondaryFilters.all { tagId ->
+                book.hasTag(tagId) ||
+                    TagMatcher.parseMetadataTags(book.originalMetadataTags).any { it.id == tagId }
             }
         }
     }
