@@ -38,6 +38,8 @@ import com.bsikar.helix.data.mapper.toImportedFiles
 import com.bsikar.helix.data.repository.EpubMetadataCacheRepository
 import com.bsikar.helix.data.repository.ChapterRepository
 import com.bsikar.helix.data.repository.AudioChapterRepository
+import javax.inject.Inject
+import javax.inject.Singleton
 
 @Serializable
 data class WatchedDirectory(
@@ -60,7 +62,8 @@ data class ImportedFile(
     val sourceUri: String? = null // Store the directory URI if from directory import
 )
 
-class LibraryManager(
+@Singleton
+class LibraryManager @Inject constructor(
     private val context: Context,
     private val preferencesManager: UserPreferencesManager,
     private val bookRepository: BookRepository,

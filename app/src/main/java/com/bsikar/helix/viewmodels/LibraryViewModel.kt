@@ -40,8 +40,20 @@ class LibraryViewModel @Inject constructor(
     val allBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = _allBooks.asStateFlow()
     
     // Search and filtering state
+    enum class LibraryContentFilter {
+        ALL,
+        TEXT_ONLY,
+        AUDIO_ONLY
+    }
+
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _contentFilter = MutableStateFlow(LibraryContentFilter.ALL)
+    val contentFilter: StateFlow<LibraryContentFilter> = _contentFilter.asStateFlow()
+
+    private val _activeTagFilters = MutableStateFlow<Set<String>>(emptySet())
+    val activeTagFilters: StateFlow<Set<String>> = _activeTagFilters.asStateFlow()
     
     // Sorting state
     private val _readingSortAscending = MutableStateFlow(false)
@@ -141,9 +153,38 @@ class LibraryViewModel @Inject constructor(
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = emptyList()
     )
-
+    
     // Debounced search query for better performance
     private val debouncedSearchQuery = searchQuery.debounce(300)
+
+    val filteredLibraryBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = combine(
+        allBooks,
+        debouncedSearchQuery,
+        contentFilter,
+        activeTagFilters
+    ) { books, query, filter, tagFilters ->
+        var filtered = when (filter) {
+            LibraryContentFilter.ALL -> books
+            LibraryContentFilter.TEXT_ONLY -> books.filter { !it.isAudiobook() }
+            LibraryContentFilter.AUDIO_ONLY -> books.filter { it.isAudiobook() }
+        }
+
+        if (tagFilters.isNotEmpty()) {
+            filtered = filtered.filter { book ->
+                tagFilters.all { tagId -> book.hasTag(tagId) }
+            }
+        }
+
+        if (query.isNotBlank()) {
+            filtered = searchBooks(filtered, query)
+        }
+
+        filtered.sortedBy { it.title.lowercase() }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
 
     // Filtered and sorted reading books
     val filteredReadingBooks: StateFlow<List<com.bsikar.helix.data.model.Book>> = combine(
@@ -439,6 +480,27 @@ class LibraryViewModel @Inject constructor(
     // Search and filtering methods
     fun updateSearchQuery(query: String) {
         _searchQuery.value = query
+    }
+
+    fun updateContentFilter(filter: LibraryContentFilter) {
+        if (_contentFilter.value == filter) return
+        _contentFilter.value = filter
+        // Clear tag filters when switching primary context to avoid stale selections
+        _activeTagFilters.value = emptySet()
+    }
+
+    fun toggleTagFilter(tagId: String) {
+        _activeTagFilters.update { current ->
+            if (current.contains(tagId)) {
+                current - tagId
+            } else {
+                current + tagId
+            }
+        }
+    }
+
+    fun clearTagFilters() {
+        _activeTagFilters.value = emptySet()
     }
 
     fun toggleReadingSortOrder() {

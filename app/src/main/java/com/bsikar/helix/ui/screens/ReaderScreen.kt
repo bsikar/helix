@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -435,7 +436,7 @@ fun ReaderScreen(
                     if (book.isImported) {
                         IconButton(onClick = { showChapterDialog = true }) {
                             Icon(
-                                Icons.Filled.MenuBook,
+                                Icons.AutoMirrored.Filled.MenuBook,
                                 contentDescription = "Chapters",
                                 tint = theme.secondaryTextColor
                             )
