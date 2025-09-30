@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -25,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -57,6 +59,7 @@ import org.jsoup.Jsoup
 import coil.compose.AsyncImage
 import com.bsikar.helix.ui.components.EpubImageComponent
 import java.io.File
+import kotlin.math.abs
 
 /**
  * Represents different types of content that can appear in EPUB
@@ -107,6 +110,9 @@ fun ReaderScreen(
     
     // Scroll state for LazyColumn
     val lazyListState = rememberLazyListState()
+    var horizontalDragAmount by remember { mutableStateOf(0f) }
+    val density = LocalDensity.current
+    val swipeThresholdPx = remember(density) { density.run { 72.dp.toPx() } }
     
     // Track if we've already restored scroll position for this book
     var hasRestoredScrollPosition by remember { mutableStateOf(false) }
@@ -426,6 +432,15 @@ fun ReaderScreen(
                     }
                 },
                 actions = {
+                    if (book.isImported) {
+                        IconButton(onClick = { showChapterDialog = true }) {
+                            Icon(
+                                Icons.Filled.MenuBook,
+                                contentDescription = "Chapters",
+                                tint = theme.secondaryTextColor
+                            )
+                        }
+                    }
                     IconButton(onClick = { showSettings = true }) {
                         Icon(
                             Icons.Filled.Settings,
@@ -458,7 +473,7 @@ fun ReaderScreen(
                         if (currentPage > 1) currentPage--
                     }
                 },
-                onNextPage = { 
+                onNextPage = {
                     if (book.isImported && parsedEpub != null) {
                         // Chapter-based navigation for EPUBs
                         readerViewModel.nextChapter(context)
@@ -467,7 +482,6 @@ fun ReaderScreen(
                         if (currentPage < totalPages) currentPage++
                     }
                 },
-                onProgressTap = { showChapterDialog = true },
                 theme = theme
             )
         }
@@ -554,7 +568,35 @@ fun ReaderScreen(
                     android.util.Log.d("ReaderContent", "Rendering LazyColumn with ${stableContent.size} items")
                     LazyColumn(
                         state = lazyListState,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pointerInput(book.id, parsedEpub, currentPage, currentChapterIndex) {
+                                detectHorizontalDragGestures(
+                                    onDragStart = { horizontalDragAmount = 0f },
+                                    onHorizontalDrag = { _, dragAmount ->
+                                        horizontalDragAmount += dragAmount
+                                    },
+                                    onDragEnd = {
+                                        if (abs(horizontalDragAmount) > swipeThresholdPx) {
+                                            if (horizontalDragAmount < 0f) {
+                                                if (book.isImported && parsedEpub != null) {
+                                                    readerViewModel.nextChapter(context)
+                                                } else if (currentPage < totalPages) {
+                                                    currentPage++
+                                                }
+                                            } else {
+                                                if (book.isImported && parsedEpub != null) {
+                                                    readerViewModel.previousChapter(context)
+                                                } else if (currentPage > 1) {
+                                                    currentPage--
+                                                }
+                                            }
+                                        }
+                                        horizontalDragAmount = 0f
+                                    },
+                                    onDragCancel = { horizontalDragAmount = 0f }
+                                )
+                            },
                         contentPadding = PaddingValues(
                             horizontal = readerSettings.marginHorizontal.dp,
                             vertical = readerSettings.marginVertical.dp
@@ -666,7 +708,6 @@ fun ReaderBottomBar(
     progress: Float,
     onPreviousPage: () -> Unit,
     onNextPage: () -> Unit,
-    onProgressTap: () -> Unit = {},
     theme: AppTheme
 ) {
     Surface(
@@ -696,7 +737,6 @@ fun ReaderBottomBar(
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
-                    .clickable { onProgressTap() }
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
                 Text(
@@ -754,16 +794,22 @@ fun ChapterSelectionDialog(
 ) {
     var searchQuery by remember { mutableStateOf("") }
     
-    // Filter chapters based on search query
-    val filteredChapters = remember(chapters, searchQuery) {
+    val indexedChapters = remember(chapters) {
+        chapters.mapIndexed { index, title -> index to title }
+    }
+
+    // Filter chapters based on search query using fuzzy search
+    val filteredChapters = remember(indexedChapters, searchQuery) {
         if (searchQuery.isBlank()) {
-            chapters.mapIndexed { index, title -> index to title }
+            indexedChapters
         } else {
-            chapters.mapIndexed { index, title -> index to title }
-                .filter { (index, title) ->
-                    title.contains(searchQuery, ignoreCase = true) ||
-                    "${index + 1}".contains(searchQuery) // Search by chapter number too
-                }
+            SearchUtils.fuzzySearch(
+                items = indexedChapters,
+                query = searchQuery,
+                getText = { it.second },
+                getSecondaryText = { "${it.first + 1}" },
+                threshold = 0.3
+            ).map { it.item }
         }
     }
     

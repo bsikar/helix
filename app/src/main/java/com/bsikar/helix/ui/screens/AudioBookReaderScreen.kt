@@ -5,7 +5,7 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -15,10 +15,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Forward30
@@ -29,6 +27,7 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -39,6 +38,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -55,6 +55,7 @@ import com.bsikar.helix.ui.components.SmoothProgressBar
 import com.bsikar.helix.ui.components.ResponsiveSpacing
 import com.bsikar.helix.viewmodels.AudioBookReaderViewModel
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -76,6 +77,9 @@ fun AudioBookReaderScreen(
     
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
+    val density = LocalDensity.current
+    val swipeThresholdPx = remember(density) { density.run { 64.dp.toPx() } }
+    var horizontalDragAmount by remember { mutableStateOf(0f) }
     
     LaunchedEffect(book) {
         viewModel.loadBook(book)
@@ -130,21 +134,6 @@ fun AudioBookReaderScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Gradient background for better visual appeal
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(0.4f)
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                book.getEffectiveCoverColor().copy(alpha = 0.3f),
-                                theme.backgroundColor
-                            )
-                        )
-                    )
-            )
-            
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -158,7 +147,29 @@ fun AudioBookReaderScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(320.dp)
-                .padding(horizontal = ResponsiveSpacing.large() * 2),
+                .padding(horizontal = ResponsiveSpacing.large() * 2)
+                .pointerInput(book.id, playbackState.currentChapter?.id) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { horizontalDragAmount = 0f },
+                        onHorizontalDrag = { _, dragAmount ->
+                            horizontalDragAmount += dragAmount
+                        },
+                        onDragEnd = {
+                            if (abs(horizontalDragAmount) > swipeThresholdPx) {
+                                if (horizontalDragAmount < 0f) {
+                                    viewModel.nextChapter()
+                                } else {
+                                    viewModel.previousChapter()
+                                }
+                            }
+                            horizontalDragAmount = 0f
+                        },
+                        onDragCancel = { horizontalDragAmount = 0f }
+                    )
+                }
+                .pointerInput(playbackState.isPlaying) {
+                    detectTapGestures(onDoubleTap = { viewModel.togglePlayPause() })
+                },
             contentAlignment = Alignment.Center
         ) {
             Card(
