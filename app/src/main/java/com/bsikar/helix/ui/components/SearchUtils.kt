@@ -1,9 +1,5 @@
 package com.bsikar.helix.ui.components
 
-import androidx.compose.foundation.text.InlineTextContent
-import androidx.compose.foundation.text.appendInlineContent
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.*
 import androidx.compose.ui.text.font.FontWeight
@@ -220,31 +216,4 @@ object SearchUtils {
             .filter { it.isNotBlank() }
             .toSet()
     }
-}
-
-/**
- * Enhanced search field component with fuzzy search
- */
-@Composable
-fun <T> SmartSearchField(
-    query: String,
-    onQueryChange: (String) -> Unit,
-    items: List<T>,
-    getText: (T) -> String,
-    getSecondaryText: (T) -> String = { "" },
-    placeholder: String = "Search...",
-    threshold: Double = 0.3,
-    maxResults: Int = 50
-): List<SearchUtils.SearchResult<T>> {
-    
-    // Perform fuzzy search
-    val searchResults = SearchUtils.fuzzySearch(
-        items = items,
-        query = query,
-        getText = getText,
-        getSecondaryText = getSecondaryText,
-        threshold = threshold
-    ).take(maxResults)
-    
-    return searchResults
 }

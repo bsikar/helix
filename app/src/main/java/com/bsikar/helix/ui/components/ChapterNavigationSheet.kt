@@ -25,6 +25,7 @@ import com.bsikar.helix.R
 import com.bsikar.helix.data.model.EpubChapter
 import com.bsikar.helix.data.model.EpubTocEntry
 
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChapterNavigationSheet(
@@ -41,24 +42,31 @@ fun ChapterNavigationSheet(
     var searchQuery by remember { mutableStateOf("") }
     var isSearchActive by remember { mutableStateOf(false) }
     
-    // Filter chapters and TOC based on search query
+    // Filter chapters and TOC based on search query using fuzzy matching
     val filteredChapters = remember(chapters, searchQuery) {
         if (searchQuery.isBlank()) {
             chapters
         } else {
-            chapters.filter { chapter ->
-                chapter.title.contains(searchQuery, ignoreCase = true)
-            }
+            SearchUtils.fuzzySearch(
+                items = chapters,
+                query = searchQuery,
+                getText = { it.title },
+                getSecondaryText = { "${it.order + 1}" },
+                threshold = 0.3
+            ).map { it.item }
         }
     }
-    
+
     val filteredTableOfContents = remember(tableOfContents, searchQuery) {
         if (searchQuery.isBlank()) {
             tableOfContents
         } else {
-            tableOfContents.filter { tocEntry ->
-                tocEntry.title.contains(searchQuery, ignoreCase = true)
-            }
+            SearchUtils.fuzzySearch(
+                items = tableOfContents,
+                query = searchQuery,
+                getText = { it.title },
+                threshold = 0.3
+            ).map { it.item }
         }
     }
     
