@@ -15,8 +15,8 @@ import com.bsikar.helix.data.repository.ReadingAnalyticsRepository
 import com.bsikar.helix.data.model.ReadingProgress
 import com.bsikar.helix.data.model.EpubTocEntry
 import com.bsikar.helix.data.source.dao.ReadingStats
-import com.bsikar.helix.ui.screens.ContentElement
-import com.bsikar.helix.ui.screens.parseHtmlToContentElements
+import com.bsikar.helix.ui.reader.ContentElement
+import com.bsikar.helix.ui.reader.parseHtmlToContentElements
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow

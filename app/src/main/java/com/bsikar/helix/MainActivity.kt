@@ -63,7 +63,6 @@ class MainActivity : ComponentActivity() {
                     currentTheme = userPreferences.themeMode,
                     onThemeChange = { newTheme -> preferencesManager.updateTheme(newTheme) },
                     theme = theme,
-                    preferencesManager = preferencesManager,
                     libraryViewModel = libraryViewModel,
                     importManager = importManager
                 )

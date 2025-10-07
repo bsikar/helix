@@ -14,8 +14,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bsikar.helix.data.ReaderSettings
-import com.bsikar.helix.ui.screens.ContentElement
-import com.bsikar.helix.ui.screens.parseHtmlToContentElements
+import com.bsikar.helix.ui.reader.ContentElement
+import com.bsikar.helix.ui.reader.parseHtmlToContentElements
+import com.bsikar.helix.ui.components.WebViewEpubRenderer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.system.measureTimeMillis
